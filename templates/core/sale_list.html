@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+
+{% block title %}Sales - SaasApp{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Sales</h1>
+    <div class="d-flex gap-2">
+        <div class="search-box">
+            <i class="bi bi-search search-icon"></i>
+            <form method="get">
+                <input type="text" name="search" class="form-control form-control-sm" placeholder="Search sales..." value="{{ search }}">
+            </form>
+        </div>
+        <a href="{% url 'sale_create' %}" class="btn btn-primary btn-sm"><i class="bi bi-plus me-1"></i>New Sale</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        {% if sales %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Sale #</th>
+                    <th>Branch</th>
+                    <th>Customer</th>
+                    <th>Items</th>
+                    <th>Total</th>
+                    <th>Payment</th>
+                    <th>Date</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sale in sales %}
+                <tr>
+                    <td><a href="{% url 'sale_detail' sale.pk %}"><strong>{{ sale.sale_number }}</strong></a></td>
+                    <td>{{ sale.branch.name }}</td>
+                    <td>{{ sale.customer_name|default:'-' }}</td>
+                    <td>{{ sale.items.count }}</td>
+                    <td>${{ sale.total_amount }}</td>
+                    <td><span class="badge badge-info">{{ sale.payment_method }}</span></td>
+                    <td class="text-muted">{{ sale.created_at|date:"M d, H:i" }}</td>
+                    <td>
+                        <a href="{% url 'sale_detail' sale.pk %}" class="btn btn-outline-primary btn-sm"><i class="bi bi-eye"></i></a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <i class="bi bi-cart" style="font-size: 3rem;"></i>
+            <h5>No sales found</h5>
+            <p>Record your first sale</p>
+            <a href="{% url 'sale_create' %}" class="btn btn-primary btn-sm">New Sale</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -1,6 +1,7 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
-from django.db.models import Sum, Count, Q
+from django.db.models import Sum, Count, Q, F
+from django.db import transaction
 from django.utils import timezone
 from django.http import JsonResponse
 from decimal import Decimal
@@ -19,7 +20,7 @@ def dashboard(request):
     recent_sales = Sale.objects.select_related('branch')[:5]
     recent_orders = Order.objects.select_related('branch')[:5]
     
-    low_stock_items = Stock.objects.filter(quantity__lte=models.F('min_quantity')).select_related('product', 'branch')[:10]
+    low_stock_items = Stock.objects.filter(quantity__lte=F('min_quantity')).select_related('product', 'branch')[:10]
     pending_orders = Order.objects.filter(status='PENDING').count()
     pending_transfers = StockMovement.objects.filter(movement_type='TRANSFER', status='PENDING').count()
     
@@ -293,19 +294,10 @@ def approve_transfer(request, pk):
     if request.method == 'POST':
         action = request.POST.get('action')
         if action == 'approve':
-            movement.status = 'APPROVED'
-            movement.stock.quantity -= movement.quantity
-            movement.stock.save()
-            
-            to_stock, created = Stock.objects.get_or_create(
-                branch=movement.to_branch,
-                product=movement.stock.product,
-                defaults={'quantity': 0}
-            )
-            to_stock.quantity += movement.quantity
-            to_stock.save()
-            
-            movement.save()
+            with transaction.atomic():
+                movement.status = 'APPROVED'
+                movement.save()
+                movement.apply_stock_adjustment()
             messages.success(request, 'Transfer approved!')
         else:
             movement.status = 'REJECTED'
@@ -460,6 +452,3 @@ def get_branch_stocks(request, branch_id):
         for s in stocks
     ]
     return JsonResponse(data, safe=False)
-
-
-from django.db import models

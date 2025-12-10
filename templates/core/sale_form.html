@@ -1,0 +1,138 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ action }} Sale - SaasApp{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">{{ action }} Sale</h1>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="post" id="saleForm">
+            {% csrf_token %}
+            <div class="row g-3 mb-4">
+                <div class="col-md-3">
+                    <label class="form-label">Branch *</label>
+                    <select name="branch" id="branchSelect" class="form-select" required>
+                        <option value="">Select Branch</option>
+                        {% for branch in branches %}
+                        <option value="{{ branch.pk }}">{{ branch.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Customer Name</label>
+                    <input type="text" name="customer_name" class="form-control">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Customer Phone</label>
+                    <input type="text" name="customer_phone" class="form-control">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Payment Method</label>
+                    <select name="payment_method" class="form-select">
+                        <option value="Cash">Cash</option>
+                        <option value="Card">Card</option>
+                        <option value="Mobile">Mobile Payment</option>
+                        <option value="Bank">Bank Transfer</option>
+                    </select>
+                </div>
+            </div>
+
+            <h6 class="mb-3">Sale Items</h6>
+            <div id="saleItems">
+                <div class="row g-2 mb-2 sale-item">
+                    <div class="col-md-5">
+                        <select name="stock_id" class="form-select form-select-sm stock-select" required>
+                            <option value="">Select Product (Select branch first)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <input type="number" name="quantity" class="form-control form-control-sm" placeholder="Qty" value="1" min="1" required>
+                    </div>
+                    <div class="col-md-3">
+                        <input type="number" name="unit_price" step="0.01" class="form-control form-control-sm" placeholder="Price" required>
+                    </div>
+                    <div class="col-md-2">
+                        <button type="button" class="btn btn-outline-danger btn-sm remove-item"><i class="bi bi-trash"></i></button>
+                    </div>
+                </div>
+            </div>
+            <button type="button" class="btn btn-outline-primary btn-sm mt-2" id="addItem">
+                <i class="bi bi-plus me-1"></i>Add Item
+            </button>
+
+            <div class="col-12 mt-3">
+                <label class="form-label">Notes</label>
+                <textarea name="notes" class="form-control" rows="2"></textarea>
+            </div>
+
+            <div class="mt-4">
+                <button type="submit" class="btn btn-primary">Create Sale</button>
+                <a href="{% url 'sale_list' %}" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let stockData = [];
+
+document.getElementById('branchSelect').addEventListener('change', function() {
+    const branchId = this.value;
+    if (branchId) {
+        fetch(`/api/branch/${branchId}/stocks/`)
+            .then(response => response.json())
+            .then(data => {
+                stockData = data;
+                updateStockSelects();
+            });
+    }
+});
+
+function updateStockSelects() {
+    document.querySelectorAll('.stock-select').forEach(select => {
+        const currentValue = select.value;
+        select.innerHTML = '<option value="">Select Product</option>';
+        stockData.forEach(stock => {
+            const option = document.createElement('option');
+            option.value = stock.id;
+            option.textContent = `${stock.product_name} (${stock.product_sku}) - Qty: ${stock.quantity}`;
+            option.dataset.price = stock.unit_price;
+            select.appendChild(option);
+        });
+        if (currentValue) select.value = currentValue;
+    });
+}
+
+document.getElementById('saleItems').addEventListener('change', function(e) {
+    if (e.target.classList.contains('stock-select')) {
+        const option = e.target.options[e.target.selectedIndex];
+        const priceInput = e.target.closest('.sale-item').querySelector('[name="unit_price"]');
+        if (option.dataset.price) {
+            priceInput.value = option.dataset.price;
+        }
+    }
+});
+
+document.getElementById('addItem').addEventListener('click', function() {
+    const template = document.querySelector('.sale-item').cloneNode(true);
+    template.querySelectorAll('input').forEach(input => input.value = input.name === 'quantity' ? '1' : '');
+    template.querySelector('select').value = '';
+    document.getElementById('saleItems').appendChild(template);
+    updateStockSelects();
+});
+
+document.getElementById('saleItems').addEventListener('click', function(e) {
+    if (e.target.closest('.remove-item')) {
+        const items = document.querySelectorAll('.sale-item');
+        if (items.length > 1) {
+            e.target.closest('.sale-item').remove();
+        }
+    }
+});
+</script>
+{% endblock %}

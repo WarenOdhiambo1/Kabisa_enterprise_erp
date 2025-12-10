@@ -104,6 +104,7 @@ class StockMovement(models.Model):
     notes = models.TextField(blank=True)
     created_by = models.ForeignKey('Employee', on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    _processed = models.BooleanField(default=False)
 
     class Meta:
         ordering = ['-created_at']
@@ -111,26 +112,37 @@ class StockMovement(models.Model):
     def __str__(self):
         return f"{self.movement_type}: {self.quantity} of {self.stock.product.name}"
 
+    def apply_stock_adjustment(self):
+        if self._processed:
+            return
+        
+        if self.movement_type in ['OUT', 'SALE']:
+            self.stock.quantity -= abs(self.quantity)
+            self.stock.save()
+        elif self.movement_type == 'IN':
+            self.stock.quantity += abs(self.quantity)
+            self.stock.save()
+        elif self.movement_type == 'TRANSFER':
+            self.stock.quantity -= abs(self.quantity)
+            self.stock.save()
+            if self.to_branch:
+                to_stock, created = Stock.objects.get_or_create(
+                    branch=self.to_branch,
+                    product=self.stock.product,
+                    defaults={'quantity': 0}
+                )
+                to_stock.quantity += abs(self.quantity)
+                to_stock.save()
+        
+        self._processed = True
+        self.save(update_fields=['_processed'])
+
     def save(self, *args, **kwargs):
         is_new = self.pk is None
         super().save(*args, **kwargs)
         
-        if is_new and self.status == 'APPROVED':
-            if self.movement_type in ['OUT', 'SALE']:
-                self.stock.quantity -= abs(self.quantity)
-            elif self.movement_type == 'IN':
-                self.stock.quantity += abs(self.quantity)
-            elif self.movement_type == 'TRANSFER':
-                self.stock.quantity -= abs(self.quantity)
-                if self.to_branch:
-                    to_stock, created = Stock.objects.get_or_create(
-                        branch=self.to_branch,
-                        product=self.stock.product,
-                        defaults={'quantity': 0}
-                    )
-                    to_stock.quantity += abs(self.quantity)
-                    to_stock.save()
-            self.stock.save()
+        if is_new and self.status == 'APPROVED' and not self._processed:
+            self.apply_stock_adjustment()
 
 
 class Order(models.Model):
