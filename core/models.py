@@ -273,3 +273,91 @@ class SaleItem(models.Model):
                 status='APPROVED',
                 notes=f"Sale #{self.sale.sale_number}"
             )
+
+
+class UserProfile(models.Model):
+    ROLE_CHOICES = [
+        ('ADMIN', 'Administrator'),
+        ('BOSS', 'Boss'),
+        ('MANAGER', 'Manager'),
+        ('FINANCE', 'Finance Officer'),
+        ('SALES', 'Salesperson'),
+        ('LOGISTICS', 'Logistics Officer'),
+    ]
+    
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='SALES')
+    branch = models.ForeignKey(Branch, on_delete=models.SET_NULL, null=True, blank=True, related_name='staff')
+    phone = models.CharField(max_length=20, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['user__username']
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.get_role_display()}"
+
+
+class Expense(models.Model):
+    EXPENSE_TYPES = [
+        ('OPERATIONAL', 'Operational Expense'),
+        ('SALE_RELATED', 'Sale Related Expense'),
+        ('TRANSPORT', 'Transport/Delivery'),
+        ('UTILITIES', 'Utilities'),
+        ('SALARY', 'Salary'),
+        ('RENT', 'Rent'),
+        ('MAINTENANCE', 'Maintenance'),
+        ('OTHER', 'Other'),
+    ]
+    
+    expense_number = models.CharField(max_length=50, unique=True)
+    branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='expenses')
+    sale = models.ForeignKey(Sale, on_delete=models.SET_NULL, null=True, blank=True, related_name='expenses')
+    expense_type = models.CharField(max_length=20, choices=EXPENSE_TYPES)
+    description = models.TextField()
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    expense_date = models.DateField()
+    receipt_number = models.CharField(max_length=100, blank=True)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-expense_date', '-created_at']
+    
+    def __str__(self):
+        return f"Expense #{self.expense_number}: {self.amount}"
+
+
+class Logistics(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('PROCESSING', 'Processing'),
+        ('IN_TRANSIT', 'In Transit'),
+        ('DELIVERED', 'Delivered'),
+        ('CANCELLED', 'Cancelled'),
+    ]
+    
+    tracking_number = models.CharField(max_length=50, unique=True)
+    sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name='logistics')
+    from_branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='outgoing_logistics')
+    to_address = models.TextField()
+    customer_name = models.CharField(max_length=200)
+    customer_phone = models.CharField(max_length=20)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    delivery_date = models.DateField(null=True, blank=True)
+    driver_name = models.CharField(max_length=100, blank=True)
+    vehicle_number = models.CharField(max_length=50, blank=True)
+    delivery_cost = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name_plural = 'Logistics'
+    
+    def __str__(self):
+        return f"Logistics #{self.tracking_number}"

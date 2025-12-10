@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Branch, Employee, Product, Stock, StockMovement, Order, OrderItem, Sale, SaleItem
+from .models import Branch, Employee, Product, Stock, StockMovement, Order, OrderItem, Sale, SaleItem, UserProfile, Expense, Logistics
 
 
 @admin.register(Branch)
@@ -62,3 +62,24 @@ class SaleAdmin(admin.ModelAdmin):
 class SaleItemAdmin(admin.ModelAdmin):
     list_display = ['sale', 'stock', 'quantity', 'unit_price', 'subtotal']
     search_fields = ['sale__sale_number']
+
+
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ['user', 'role', 'branch', 'phone']
+    list_filter = ['role', 'branch']
+    search_fields = ['user__username', 'user__email']
+
+
+@admin.register(Expense)
+class ExpenseAdmin(admin.ModelAdmin):
+    list_display = ['expense_number', 'branch', 'expense_type', 'amount', 'expense_date', 'sale']
+    list_filter = ['expense_type', 'branch', 'expense_date']
+    search_fields = ['expense_number', 'description']
+
+
+@admin.register(Logistics)
+class LogisticsAdmin(admin.ModelAdmin):
+    list_display = ['tracking_number', 'customer_name', 'from_branch', 'status', 'delivery_date', 'delivery_cost']
+    list_filter = ['status', 'from_branch']
+    search_fields = ['tracking_number', 'customer_name', 'customer_phone']

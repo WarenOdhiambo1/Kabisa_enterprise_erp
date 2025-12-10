@@ -1,43 +1,136 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
+from django.contrib.auth import authenticate, login as auth_login, logout as auth_logout
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
 from django.db.models import Sum, Count, Q, F
 from django.db import transaction
 from django.utils import timezone
 from django.http import JsonResponse
 from decimal import Decimal
+from functools import wraps
+from datetime import datetime, timedelta
 import uuid
 
-from .models import Branch, Employee, Product, Stock, StockMovement, Order, OrderItem, Sale, SaleItem
+from .models import Branch, Employee, Product, Stock, StockMovement, Order, OrderItem, Sale, SaleItem, UserProfile, Expense, Logistics
 
 
+def role_required(*roles):
+    """Decorator to check if user has required role"""
+    def decorator(view_func):
+        @wraps(view_func)
+        @login_required
+        def wrapped_view(request, *args, **kwargs):
+            try:
+                profile = request.user.profile
+                if profile.role in roles or profile.role == 'ADMIN' or profile.role == 'BOSS':
+                    return view_func(request, *args, **kwargs)
+                else:
+                    messages.error(request, 'You do not have permission to access this page.')
+                    return redirect('dashboard')
+            except UserProfile.DoesNotExist:
+                messages.error(request, 'User profile not found. Please contact administrator.')
+                return redirect('login')
+        return wrapped_view
+    return decorator
+
+
+def login_view(request):
+    if request.user.is_authenticated:
+        return redirect('dashboard')
+    
+    if request.method == 'POST':
+        username = request.POST.get('username')
+        password = request.POST.get('password')
+        user = authenticate(request, username=username, password=password)
+        
+        if user is not None:
+            auth_login(request, user)
+            messages.success(request, f'Welcome back, {user.username}!')
+            return redirect('dashboard')
+        else:
+            messages.error(request, 'Invalid username or password.')
+    
+    return render(request, 'core/login.html')
+
+
+def logout_view(request):
+    auth_logout(request)
+    messages.success(request, 'You have been logged out successfully.')
+    return redirect('login')
+
+
+@login_required
 def dashboard(request):
-    branches = Branch.objects.filter(is_active=True)
+    user_profile = request.user.profile if hasattr(request.user, 'profile') else None
+    
+    # Filter data based on user role
+    if user_profile and user_profile.role == 'SALES' and user_profile.branch:
+        # Sales person sees only their branch
+        branches = Branch.objects.filter(id=user_profile.branch.id, is_active=True)
+        sales_filter = Q(branch=user_profile.branch)
+        expense_filter = Q(branch=user_profile.branch)
+    elif user_profile and user_profile.role in ['MANAGER'] and user_profile.branch:
+        # Manager sees their branch
+        branches = Branch.objects.filter(id=user_profile.branch.id, is_active=True)
+        sales_filter = Q(branch=user_profile.branch)
+        expense_filter = Q(branch=user_profile.branch)
+    else:
+        # Admin, Boss, Finance see all
+        branches = Branch.objects.filter(is_active=True)
+        sales_filter = Q()
+        expense_filter = Q()
+    
     total_branches = branches.count()
     total_employees = Employee.objects.filter(is_active=True).count()
     total_products = Product.objects.filter(is_active=True).count()
     
-    total_sales = Sale.objects.aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00')
-    recent_sales = Sale.objects.select_related('branch')[:5]
+    # Financial metrics
+    today = timezone.now().date()
+    month_start = today.replace(day=1)
+    
+    total_sales = Sale.objects.filter(sales_filter).aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00')
+    monthly_sales = Sale.objects.filter(sales_filter, created_at__gte=month_start).aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00')
+    
+    total_expenses = Expense.objects.filter(expense_filter).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+    monthly_expenses = Expense.objects.filter(expense_filter, expense_date__gte=month_start).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+    
+    total_profit = total_sales - total_expenses
+    monthly_profit = monthly_sales - monthly_expenses
+    
+    recent_sales = Sale.objects.filter(sales_filter).select_related('branch')[:5]
     recent_orders = Order.objects.select_related('branch')[:5]
+    recent_expenses = Expense.objects.filter(expense_filter).select_related('branch')[:5]
     
     low_stock_items = Stock.objects.filter(quantity__lte=F('min_quantity')).select_related('product', 'branch')[:10]
     pending_orders = Order.objects.filter(status='PENDING').count()
     pending_transfers = StockMovement.objects.filter(movement_type='TRANSFER', status='PENDING').count()
+    pending_logistics = Logistics.objects.filter(status__in=['PENDING', 'PROCESSING', 'IN_TRANSIT']).count()
     
     context = {
+        'user_profile': user_profile,
         'total_branches': total_branches,
         'total_employees': total_employees,
         'total_products': total_products,
         'total_sales': total_sales,
+        'monthly_sales': monthly_sales,
+        'total_expenses': total_expenses,
+        'monthly_expenses': monthly_expenses,
+        'total_profit': total_profit,
+        'monthly_profit': monthly_profit,
         'recent_sales': recent_sales,
         'recent_orders': recent_orders,
+        'recent_expenses': recent_expenses,
         'low_stock_items': low_stock_items,
         'pending_orders': pending_orders,
         'pending_transfers': pending_transfers,
+        'pending_logistics': pending_logistics,
     }
     return render(request, 'core/dashboard.html', context)
 
 
+@login_required
+@role_required('ADMIN', 'BOSS', 'MANAGER')
 def branch_list(request):
     search = request.GET.get('search', '')
     branches = Branch.objects.all()
@@ -383,9 +476,16 @@ def order_complete(request, pk):
     return redirect('order_list')
 
 
+@login_required
+@role_required('ADMIN', 'BOSS', 'MANAGER', 'FINANCE', 'SALES')
 def sale_list(request):
     search = request.GET.get('search', '')
     sales = Sale.objects.select_related('branch').prefetch_related('items__stock__product').all()
+    
+    # Filter by branch for sales users
+    user_profile = request.user.profile if hasattr(request.user, 'profile') else None
+    if user_profile and user_profile.role == 'SALES' and user_profile.branch:
+        sales = sales.filter(branch=user_profile.branch)
     
     if search:
         sales = sales.filter(
@@ -396,10 +496,23 @@ def sale_list(request):
     return render(request, 'core/sale_list.html', {'sales': sales, 'search': search})
 
 
+@login_required
+@role_required('ADMIN', 'MANAGER', 'BOSS', 'SALES')
 def sale_create(request):
     branches = Branch.objects.filter(is_active=True)
     
     if request.method == 'POST':
+        # Check if confirmation is required
+        if request.POST.get('confirm') != 'true':
+            # First submission - show confirmation
+            return render(request, 'core/sale_form.html', {
+                'branches': branches,
+                'action': 'Create',
+                'confirm_data': request.POST,
+                'show_confirmation': True
+            })
+        
+        # Confirmed submission
         branch_id = request.POST.get('branch')
         sale = Sale.objects.create(
             sale_number=f"SALE-{uuid.uuid4().hex[:8].upper()}",
@@ -428,7 +541,22 @@ def sale_create(request):
                 )
         
         sale.calculate_total()
-        messages.success(request, f'Sale {sale.sale_number} created!')
+        
+        # Add expense if provided
+        expense_amount = request.POST.get('expense_amount')
+        if expense_amount and Decimal(expense_amount) > 0:
+            Expense.objects.create(
+                expense_number=f"EXP-{uuid.uuid4().hex[:8].upper()}",
+                branch_id=branch_id,
+                sale=sale,
+                expense_type='SALE_RELATED',
+                description=request.POST.get('expense_description', 'Sale related expense'),
+                amount=Decimal(expense_amount),
+                expense_date=timezone.now().date(),
+                notes=request.POST.get('expense_notes', ''),
+            )
+        
+        messages.success(request, f'Sale {sale.sale_number} created successfully!')
         return redirect('sale_list')
     
     return render(request, 'core/sale_form.html', {'branches': branches, 'action': 'Create'})
@@ -452,3 +580,310 @@ def get_branch_stocks(request, branch_id):
         for s in stocks
     ]
     return JsonResponse(data, safe=False)
+
+
+# Expense Management
+@login_required
+@role_required('ADMIN', 'MANAGER', 'BOSS', 'FINANCE', 'SALES')
+def expense_list(request):
+    search = request.GET.get('search', '')
+    expenses = Expense.objects.select_related('branch', 'sale', 'created_by').all()
+    
+    # Filter by branch for sales users
+    user_profile = request.user.profile if hasattr(request.user, 'profile') else None
+    if user_profile and user_profile.role == 'SALES' and user_profile.branch:
+        expenses = expenses.filter(branch=user_profile.branch)
+    
+    if search:
+        expenses = expenses.filter(
+            Q(expense_number__icontains=search) | 
+            Q(description__icontains=search)
+        )
+    
+    return render(request, 'core/expense_list.html', {'expenses': expenses, 'search': search})
+
+
+@login_required
+@role_required('ADMIN', 'MANAGER', 'BOSS', 'FINANCE', 'SALES')
+def expense_create(request):
+    branches = Branch.objects.filter(is_active=True)
+    sales = Sale.objects.select_related('branch').all()
+    
+    if request.method == 'POST':
+        expense = Expense.objects.create(
+            expense_number=f"EXP-{uuid.uuid4().hex[:8].upper()}",
+            branch_id=request.POST.get('branch'),
+            sale_id=request.POST.get('sale') if request.POST.get('sale') else None,
+            expense_type=request.POST.get('expense_type'),
+            description=request.POST.get('description'),
+            amount=Decimal(request.POST.get('amount', '0')),
+            expense_date=request.POST.get('expense_date'),
+            receipt_number=request.POST.get('receipt_number', ''),
+            notes=request.POST.get('notes', ''),
+        )
+        messages.success(request, f'Expense {expense.expense_number} created!')
+        return redirect('expense_list')
+    
+    return render(request, 'core/expense_form.html', {
+        'branches': branches,
+        'sales': sales,
+        'action': 'Create'
+    })
+
+
+# Logistics Management
+@login_required
+@role_required('ADMIN', 'MANAGER', 'BOSS', 'LOGISTICS', 'SALES')
+def logistics_list(request):
+    search = request.GET.get('search', '')
+    logistics = Logistics.objects.select_related('sale', 'from_branch', 'created_by').all()
+    
+    if search:
+        logistics = logistics.filter(
+            Q(tracking_number__icontains=search) | 
+            Q(customer_name__icontains=search)
+        )
+    
+    return render(request, 'core/logistics_list.html', {'logistics': logistics, 'search': search})
+
+
+@login_required
+@role_required('ADMIN', 'MANAGER', 'BOSS', 'LOGISTICS')
+def logistics_create(request):
+    sales = Sale.objects.select_related('branch').all()
+    branches = Branch.objects.filter(is_active=True)
+    
+    if request.method == 'POST':
+        logistics = Logistics.objects.create(
+            tracking_number=f"TRK-{uuid.uuid4().hex[:8].upper()}",
+            sale_id=request.POST.get('sale'),
+            from_branch_id=request.POST.get('from_branch'),
+            to_address=request.POST.get('to_address'),
+            customer_name=request.POST.get('customer_name'),
+            customer_phone=request.POST.get('customer_phone'),
+            delivery_date=request.POST.get('delivery_date') if request.POST.get('delivery_date') else None,
+            driver_name=request.POST.get('driver_name', ''),
+            vehicle_number=request.POST.get('vehicle_number', ''),
+            delivery_cost=Decimal(request.POST.get('delivery_cost', '0')),
+            notes=request.POST.get('notes', ''),
+        )
+        messages.success(request, f'Logistics {logistics.tracking_number} created!')
+        return redirect('logistics_list')
+    
+    return render(request, 'core/logistics_form.html', {
+        'sales': sales,
+        'branches': branches,
+        'action': 'Create'
+    })
+
+
+@login_required
+@role_required('ADMIN', 'MANAGER', 'BOSS', 'LOGISTICS')
+def logistics_update_status(request, pk):
+    logistics = get_object_or_404(Logistics, pk=pk)
+    if request.method == 'POST':
+        logistics.status = request.POST.get('status')
+        logistics.save()
+        messages.success(request, f'Logistics status updated to {logistics.get_status_display()}!')
+    return redirect('logistics_list')
+
+
+# Financial Reports
+@login_required
+@role_required('ADMIN', 'BOSS', 'FINANCE', 'MANAGER')
+def financial_reports(request):
+    # Get date range from request or default to current month
+    year = int(request.GET.get('year', timezone.now().year))
+    month = int(request.GET.get('month', timezone.now().month))
+    
+    # Calculate date range
+    start_date = datetime(year, month, 1).date()
+    if month == 12:
+        end_date = datetime(year + 1, 1, 1).date()
+    else:
+        end_date = datetime(year, month + 1, 1).date()
+    
+    # Get all branches or filter by user
+    user_profile = request.user.profile if hasattr(request.user, 'profile') else None
+    if user_profile and user_profile.role == 'MANAGER' and user_profile.branch:
+        branches = [user_profile.branch]
+    else:
+        branches = Branch.objects.filter(is_active=True)
+    
+    # Calculate financials per branch
+    branch_reports = []
+    total_sales = Decimal('0.00')
+    total_expenses = Decimal('0.00')
+    total_profit = Decimal('0.00')
+    
+    for branch in branches:
+        sales = Sale.objects.filter(
+            branch=branch,
+            created_at__gte=start_date,
+            created_at__lt=end_date
+        ).aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00')
+        
+        expenses = Expense.objects.filter(
+            branch=branch,
+            expense_date__gte=start_date,
+            expense_date__lt=end_date
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        
+        profit = sales - expenses
+        
+        branch_reports.append({
+            'branch': branch,
+            'sales': sales,
+            'expenses': expenses,
+            'profit': profit,
+        })
+        
+        total_sales += sales
+        total_expenses += expenses
+        total_profit += profit
+    
+    context = {
+        'branch_reports': branch_reports,
+        'total_sales': total_sales,
+        'total_expenses': total_expenses,
+        'total_profit': total_profit,
+        'year': year,
+        'month': month,
+        'month_name': datetime(year, month, 1).strftime('%B'),
+    }
+    return render(request, 'core/financial_reports.html', context)
+
+
+# Branch Detail Page
+@login_required
+@role_required('ADMIN', 'BOSS', 'MANAGER')
+def branch_detail(request, pk):
+    branch = get_object_or_404(Branch, pk=pk)
+    
+    # Get current month data
+    today = timezone.now().date()
+    month_start = today.replace(day=1)
+    
+    # Financial metrics
+    monthly_sales = Sale.objects.filter(branch=branch, created_at__gte=month_start).aggregate(
+        total=Sum('total_amount')
+    )['total'] or Decimal('0.00')
+    
+    monthly_expenses = Expense.objects.filter(branch=branch, expense_date__gte=month_start).aggregate(
+        total=Sum('amount')
+    )['total'] or Decimal('0.00')
+    
+    monthly_profit = monthly_sales - monthly_expenses
+    
+    # Stock information
+    total_stock_value = Stock.objects.filter(branch=branch).annotate(
+        value=F('quantity') * F('product__cost_price')
+    ).aggregate(total=Sum('value'))['total'] or Decimal('0.00')
+    
+    low_stock_count = Stock.objects.filter(branch=branch, quantity__lte=F('min_quantity')).count()
+    
+    # Recent activities
+    recent_sales = Sale.objects.filter(branch=branch).select_related('created_by')[:10]
+    recent_expenses = Expense.objects.filter(branch=branch).select_related('created_by')[:10]
+    
+    context = {
+        'branch': branch,
+        'monthly_sales': monthly_sales,
+        'monthly_expenses': monthly_expenses,
+        'monthly_profit': monthly_profit,
+        'total_stock_value': total_stock_value,
+        'low_stock_count': low_stock_count,
+        'recent_sales': recent_sales,
+        'recent_expenses': recent_expenses,
+    }
+    return render(request, 'core/branch_detail.html', context)
+
+
+# User Management
+@login_required
+@role_required('ADMIN', 'BOSS')
+def user_list(request):
+    users = User.objects.select_related('profile').all()
+    return render(request, 'core/user_list.html', {'users': users})
+
+
+@login_required
+@role_required('ADMIN', 'BOSS')
+def user_create(request):
+    branches = Branch.objects.filter(is_active=True)
+    
+    if request.method == 'POST':
+        username = request.POST.get('username')
+        email = request.POST.get('email')
+        password = request.POST.get('password')
+        role = request.POST.get('role')
+        branch_id = request.POST.get('branch')
+        phone = request.POST.get('phone', '')
+        
+        # Create user
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password,
+            first_name=request.POST.get('first_name', ''),
+            last_name=request.POST.get('last_name', ''),
+        )
+        
+        # Create profile
+        UserProfile.objects.create(
+            user=user,
+            role=role,
+            branch_id=branch_id if branch_id else None,
+            phone=phone,
+        )
+        
+        messages.success(request, f'User {username} created successfully!')
+        return redirect('user_list')
+    
+    return render(request, 'core/user_form.html', {
+        'branches': branches,
+        'action': 'Create'
+    })
+
+
+@login_required
+@role_required('ADMIN', 'BOSS')
+def user_edit(request, pk):
+    user = get_object_or_404(User, pk=pk)
+    profile = user.profile if hasattr(user, 'profile') else None
+    branches = Branch.objects.filter(is_active=True)
+    
+    if request.method == 'POST':
+        user.username = request.POST.get('username')
+        user.email = request.POST.get('email')
+        user.first_name = request.POST.get('first_name', '')
+        user.last_name = request.POST.get('last_name', '')
+        
+        password = request.POST.get('password')
+        if password:
+            user.set_password(password)
+        
+        user.save()
+        
+        if profile:
+            profile.role = request.POST.get('role')
+            profile.branch_id = request.POST.get('branch') if request.POST.get('branch') else None
+            profile.phone = request.POST.get('phone', '')
+            profile.save()
+        else:
+            UserProfile.objects.create(
+                user=user,
+                role=request.POST.get('role'),
+                branch_id=request.POST.get('branch') if request.POST.get('branch') else None,
+                phone=request.POST.get('phone', ''),
+            )
+        
+        messages.success(request, f'User {user.username} updated successfully!')
+        return redirect('user_list')
+    
+    return render(request, 'core/user_form.html', {
+        'user': user,
+        'profile': profile,
+        'branches': branches,
+        'action': 'Edit'
+    })
