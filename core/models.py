@@ -330,6 +330,276 @@ class Expense(models.Model):
         return f"Expense #{self.expense_number}: {self.amount}"
 
 
+class Vehicle(models.Model):
+    """Company vehicles that can be assigned to trips and require maintenance"""
+    VEHICLE_TYPES = [
+        ('TRUCK', 'Truck'),
+        ('VAN', 'Van'),
+        ('PICKUP', 'Pickup'),
+        ('CAR', 'Car'),
+        ('MOTORCYCLE', 'Motorcycle'),
+        ('OTHER', 'Other'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('ACTIVE', 'Active'),
+        ('MAINTENANCE', 'Under Maintenance'),
+        ('INACTIVE', 'Inactive'),
+        ('RETIRED', 'Retired'),
+    ]
+    
+    registration_number = models.CharField(max_length=50, unique=True, help_text="License plate number")
+    vehicle_type = models.CharField(max_length=20, choices=VEHICLE_TYPES)
+    make = models.CharField(max_length=100, help_text="Manufacturer (e.g., Toyota, Ford)")
+    model = models.CharField(max_length=100, help_text="Model name")
+    year = models.IntegerField(help_text="Manufacturing year")
+    color = models.CharField(max_length=50, blank=True)
+    
+    # Ownership & assignment
+    branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='vehicles')
+    assigned_driver = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_vehicles')
+    
+    # Status & tracking
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='ACTIVE')
+    current_mileage = models.IntegerField(default=0, help_text="Current odometer reading in KM")
+    fuel_capacity = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('0.00'), help_text="Fuel tank capacity in liters")
+    
+    # Financial tracking
+    purchase_price = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    purchase_date = models.DateField(null=True, blank=True)
+    
+    # Insurance & compliance
+    insurance_expiry = models.DateField(null=True, blank=True)
+    registration_expiry = models.DateField(null=True, blank=True)
+    
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['registration_number']
+    
+    def __str__(self):
+        return f"{self.registration_number} - {self.make} {self.model}"
+    
+    @property
+    def total_trips(self):
+        return self.trips.count()
+    
+    @property
+    def total_revenue(self):
+        """Total revenue earned from all trips"""
+        return sum(trip.revenue for trip in self.trips.filter(status='COMPLETED'))
+    
+    @property
+    def total_maintenance_cost(self):
+        """Total spent on maintenance"""
+        return sum(maintenance.total_cost for maintenance in self.maintenance_records.all())
+    
+    @property
+    def is_due_for_maintenance(self):
+        """Check if vehicle needs maintenance based on last service"""
+        last_maintenance = self.maintenance_records.order_by('-service_date').first()
+        if not last_maintenance:
+            return True
+        # Simple check: if more than 5000 KM since last service
+        return (self.current_mileage - last_maintenance.mileage_at_service) > 5000
+
+
+class Trip(models.Model):
+    """Vehicle trips that generate revenue for the business"""
+    STATUS_CHOICES = [
+        ('SCHEDULED', 'Scheduled'),
+        ('IN_PROGRESS', 'In Progress'),
+        ('COMPLETED', 'Completed'),
+        ('CANCELLED', 'Cancelled'),
+    ]
+    
+    TRIP_TYPES = [
+        ('DELIVERY', 'Delivery'),
+        ('PICKUP', 'Pickup'),
+        ('TRANSPORT', 'Transport'),
+        ('RENTAL', 'Rental'),
+        ('OTHER', 'Other'),
+    ]
+    
+    trip_number = models.CharField(max_length=50, unique=True)
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name='trips')
+    driver = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, related_name='trips_driven')
+    
+    # Trip details
+    trip_type = models.CharField(max_length=20, choices=TRIP_TYPES, default='DELIVERY')
+    origin = models.CharField(max_length=200, help_text="Starting location")
+    destination = models.CharField(max_length=200, help_text="Destination location")
+    distance = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal('0.00'), help_text="Distance in KM")
+    
+    # Related entities
+    sale = models.ForeignKey(Sale, on_delete=models.SET_NULL, null=True, blank=True, related_name='trips', help_text="Related sale if this is a delivery trip")
+    logistics = models.ForeignKey('Logistics', on_delete=models.SET_NULL, null=True, blank=True, related_name='trips', help_text="Related logistics record")
+    
+    # Status & timing
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='SCHEDULED')
+    scheduled_date = models.DateTimeField()
+    start_time = models.DateTimeField(null=True, blank=True)
+    end_time = models.DateTimeField(null=True, blank=True)
+    
+    # Financial
+    revenue = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'), help_text="Revenue earned from this trip")
+    fuel_cost = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'), help_text="Fuel expense for this trip")
+    other_expenses = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'), help_text="Tolls, parking, etc.")
+    
+    # Tracking
+    start_mileage = models.IntegerField(null=True, blank=True, help_text="Odometer at trip start")
+    end_mileage = models.IntegerField(null=True, blank=True, help_text="Odometer at trip end")
+    
+    customer_name = models.CharField(max_length=200, blank=True)
+    customer_phone = models.CharField(max_length=20, blank=True)
+    notes = models.TextField(blank=True)
+    
+    created_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True, related_name='trips_created')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-scheduled_date', '-created_at']
+    
+    def __str__(self):
+        return f"Trip #{self.trip_number} - {self.vehicle.registration_number}"
+    
+    @property
+    def net_profit(self):
+        """Calculate profit: revenue - all expenses"""
+        return self.revenue - (self.fuel_cost + self.other_expenses)
+    
+    @property
+    def duration(self):
+        """Calculate trip duration if completed"""
+        if self.start_time and self.end_time:
+            return self.end_time - self.start_time
+        return None
+    
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+        
+        # Update vehicle mileage when trip is completed
+        if self.status == 'COMPLETED' and self.end_mileage:
+            self.vehicle.current_mileage = self.end_mileage
+            self.vehicle.save(update_fields=['current_mileage'])
+        
+        # Create expense record for trip costs if completed
+        if not is_new and self.status == 'COMPLETED' and (self.fuel_cost > 0 or self.other_expenses > 0):
+            total_trip_expense = self.fuel_cost + self.other_expenses
+            if total_trip_expense > 0:
+                expense_number = f"TRIP-{self.trip_number}"
+                # Check if expense already exists
+                if not Expense.objects.filter(expense_number=expense_number).exists():
+                    Expense.objects.create(
+                        expense_number=expense_number,
+                        branch=self.vehicle.branch,
+                        sale=self.sale,
+                        expense_type='TRANSPORT',
+                        description=f"Trip expenses for {self.trip_number}: {self.origin} to {self.destination}",
+                        amount=total_trip_expense,
+                        expense_date=self.end_time.date() if self.end_time else self.scheduled_date.date(),
+                        notes=f"Fuel: {self.fuel_cost}, Other: {self.other_expenses}",
+                        created_by=self.created_by
+                    )
+
+
+class VehicleMaintenance(models.Model):
+    """Maintenance and repair records for vehicles"""
+    MAINTENANCE_TYPES = [
+        ('ROUTINE', 'Routine Service'),
+        ('REPAIR', 'Repair'),
+        ('INSPECTION', 'Inspection'),
+        ('TIRE', 'Tire Service'),
+        ('BRAKE', 'Brake Service'),
+        ('ENGINE', 'Engine Work'),
+        ('ELECTRICAL', 'Electrical'),
+        ('BODYWORK', 'Body Work'),
+        ('OTHER', 'Other'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('SCHEDULED', 'Scheduled'),
+        ('IN_PROGRESS', 'In Progress'),
+        ('COMPLETED', 'Completed'),
+        ('CANCELLED', 'Cancelled'),
+    ]
+    
+    maintenance_number = models.CharField(max_length=50, unique=True)
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name='maintenance_records')
+    maintenance_type = models.CharField(max_length=20, choices=MAINTENANCE_TYPES)
+    
+    # Service details
+    description = models.TextField(help_text="What work was done")
+    service_provider = models.CharField(max_length=200, help_text="Garage/mechanic name")
+    service_date = models.DateField()
+    completion_date = models.DateField(null=True, blank=True)
+    
+    # Financial
+    parts_cost = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    labor_cost = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    other_costs = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    
+    # Tracking
+    mileage_at_service = models.IntegerField(help_text="Vehicle mileage at time of service")
+    next_service_mileage = models.IntegerField(null=True, blank=True, help_text="When next service is due")
+    
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='SCHEDULED')
+    receipt_number = models.CharField(max_length=100, blank=True)
+    notes = models.TextField(blank=True)
+    
+    created_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-service_date', '-created_at']
+        verbose_name_plural = 'Vehicle Maintenance Records'
+    
+    def __str__(self):
+        return f"Maintenance #{self.maintenance_number} - {self.vehicle.registration_number}"
+    
+    @property
+    def total_cost(self):
+        """Total maintenance cost"""
+        return self.parts_cost + self.labor_cost + self.other_costs
+    
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+        
+        # Update vehicle status when maintenance starts
+        if self.status == 'IN_PROGRESS' and self.vehicle.status != 'MAINTENANCE':
+            self.vehicle.status = 'MAINTENANCE'
+            self.vehicle.save(update_fields=['status'])
+        
+        # Update vehicle status when maintenance completes
+        if self.status == 'COMPLETED':
+            if self.vehicle.status == 'MAINTENANCE':
+                self.vehicle.status = 'ACTIVE'
+                self.vehicle.save(update_fields=['status'])
+            
+            # Create expense record for maintenance
+            if not is_new and self.total_cost > 0:
+                expense_number = f"MAINT-{self.maintenance_number}"
+                # Check if expense already exists
+                if not Expense.objects.filter(expense_number=expense_number).exists():
+                    Expense.objects.create(
+                        expense_number=expense_number,
+                        branch=self.vehicle.branch,
+                        expense_type='MAINTENANCE',
+                        description=f"Vehicle maintenance: {self.description}",
+                        amount=self.total_cost,
+                        expense_date=self.completion_date or self.service_date,
+                        receipt_number=self.receipt_number,
+                        notes=f"Parts: {self.parts_cost}, Labor: {self.labor_cost}, Other: {self.other_costs}",
+                        created_by=self.created_by
+                    )
+
+
 class Logistics(models.Model):
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
@@ -347,8 +617,15 @@ class Logistics(models.Model):
     customer_phone = models.CharField(max_length=20)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
     delivery_date = models.DateField(null=True, blank=True)
-    driver_name = models.CharField(max_length=100, blank=True)
-    vehicle_number = models.CharField(max_length=50, blank=True)
+    
+    # Updated to use Vehicle model instead of plain text
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.SET_NULL, null=True, blank=True, related_name='logistics_assignments')
+    driver = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True, related_name='logistics_deliveries')
+    
+    # Keep legacy fields for backward compatibility
+    driver_name = models.CharField(max_length=100, blank=True, help_text="Legacy field - use driver FK instead")
+    vehicle_number = models.CharField(max_length=50, blank=True, help_text="Legacy field - use vehicle FK instead")
+    
     delivery_cost = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     notes = models.TextField(blank=True)
     created_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
