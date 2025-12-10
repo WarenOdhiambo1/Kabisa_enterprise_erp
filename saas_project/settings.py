@@ -56,14 +56,22 @@ WSGI_APPLICATION = 'saas_project.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('PGDATABASE', default=''),
-        'USER': config('PGUSER', default=''),
-        'PASSWORD': config('PGPASSWORD', default=''),
-        'HOST': config('PGHOST', default=''),
-        'PORT': config('PGPORT', default='5432'),
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
+
+# Uncomment below for PostgreSQL production
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': config('PGDATABASE', default=''),
+#         'USER': config('PGUSER', default=''),
+#         'PASSWORD': config('PGPASSWORD', default=''),
+#         'HOST': config('PGHOST', default=''),
+#         'PORT': config('PGPORT', default='5432'),
+#     }
+# }
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
@@ -85,3 +93,7 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 X_FRAME_OPTIONS = 'ALLOWALL'
+
+LOGIN_URL = 'login'
+LOGIN_REDIRECT_URL = 'dashboard'
+LOGOUT_REDIRECT_URL = 'login'
