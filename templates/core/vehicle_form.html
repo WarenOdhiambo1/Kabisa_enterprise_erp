@@ -1,0 +1,101 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ action }} Vehicle - SaasApp{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">{{ action }} Vehicle</h1>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="post">
+            {% csrf_token %}
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Registration Number *</label>
+                    <input type="text" name="registration_number" class="form-control" required>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Vehicle Type *</label>
+                    <select name="vehicle_type" class="form-select" required>
+                        <option value="">Select Type</option>
+                        <option value="TRUCK">Truck</option>
+                        <option value="VAN">Van</option>
+                        <option value="PICKUP">Pickup</option>
+                        <option value="CAR">Car</option>
+                        <option value="MOTORCYCLE">Motorcycle</option>
+                        <option value="OTHER">Other</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Make *</label>
+                    <input type="text" name="make" class="form-control" required>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Model *</label>
+                    <input type="text" name="model" class="form-control" required>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Year *</label>
+                    <input type="number" name="year" class="form-control" min="1990" max="2030" required>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Branch *</label>
+                    <select name="branch" class="form-select" required>
+                        <option value="">Select Branch</option>
+                        {% for branch in branches %}
+                        <option value="{{ branch.pk }}">{{ branch.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Assigned Driver</label>
+                    <select name="assigned_driver" class="form-select">
+                        <option value="">No Driver Assigned</option>
+                        {% for driver in drivers %}
+                        <option value="{{ driver.pk }}">{{ driver.full_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Current Mileage (KM)</label>
+                    <input type="number" name="current_mileage" class="form-control" min="0" value="0">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Fuel Capacity (L)</label>
+                    <input type="number" name="fuel_capacity" class="form-control" step="0.01" min="0" value="0">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Color</label>
+                    <input type="text" name="color" class="form-control">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Purchase Price</label>
+                    <input type="number" name="purchase_price" class="form-control" step="0.01" min="0" value="0">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Purchase Date</label>
+                    <input type="date" name="purchase_date" class="form-control">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Insurance Expiry</label>
+                    <input type="date" name="insurance_expiry" class="form-control">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Registration Expiry</label>
+                    <input type="date" name="registration_expiry" class="form-control">
+                </div>
+                <div class="col-12">
+                    <label class="form-label">Notes</label>
+                    <textarea name="notes" class="form-control" rows="3"></textarea>
+                </div>
+            </div>
+            <div class="mt-4">
+                <button type="submit" class="btn btn-primary">{{ action }} Vehicle</button>
+                <a href="{% url 'vehicle_list' %}" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

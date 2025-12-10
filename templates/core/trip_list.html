@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+
+{% block title %}Trips - SaasApp{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Trips</h1>
+    <div class="page-actions">
+        <a href="{% url 'trip_create' %}" class="btn btn-primary">Create Trip</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <form method="get" class="mb-3">
+            <div class="input-group">
+                <input type="text" name="search" class="form-control" placeholder="Search trips..." value="{{ search }}">
+                <button type="submit" class="btn btn-outline-secondary">Search</button>
+            </div>
+        </form>
+
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Trip #</th>
+                        <th>Vehicle</th>
+                        <th>Driver</th>
+                        <th>Route</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Revenue</th>
+                        <th>Profit</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for trip in trips %}
+                    <tr>
+                        <td><strong>{{ trip.trip_number }}</strong></td>
+                        <td>{{ trip.vehicle.registration_number }}</td>
+                        <td>{{ trip.driver|default:"-" }}</td>
+                        <td>{{ trip.origin }} → {{ trip.destination }}</td>
+                        <td>{{ trip.get_trip_type_display }}</td>
+                        <td>
+                            <span class="badge bg-{% if trip.status == 'COMPLETED' %}success{% elif trip.status == 'IN_PROGRESS' %}warning{% elif trip.status == 'SCHEDULED' %}info{% else %}secondary{% endif %}">
+                                {{ trip.get_status_display }}
+                            </span>
+                        </td>
+                        <td>${{ trip.revenue|floatformat:2 }}</td>
+                        <td class="{% if trip.net_profit >= 0 %}text-success{% else %}text-danger{% endif %}">
+                            ${{ trip.net_profit|floatformat:2 }}
+                        </td>
+                        <td>{{ trip.scheduled_date|date:"M d, Y" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="9" class="text-center text-muted">No trips found</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
