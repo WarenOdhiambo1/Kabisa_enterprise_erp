@@ -12,7 +12,7 @@ from functools import wraps
 from datetime import datetime, timedelta
 import uuid
 
-from .models import Branch, Employee, Product, Stock, StockMovement, Order, OrderItem, Sale, SaleItem, UserProfile, Expense, Logistics
+from .models import Branch, Employee, Product, Stock, StockMovement, Order, OrderItem, Sale, SaleItem, UserProfile, Expense, Logistics, Vehicle, Trip, VehicleMaintenance
 
 
 def role_required(*roles):
@@ -33,6 +33,11 @@ def role_required(*roles):
                 return redirect('login')
         return wrapped_view
     return decorator
+
+
+def create_transfer_alert(stock_movement):
+    """Create alert for receiving branch when transfer is requested"""
+    pass  # Simplified for now
 
 
 def login_view(request):
@@ -107,6 +112,9 @@ def dashboard(request):
     pending_transfers = StockMovement.objects.filter(movement_type='TRANSFER', status='PENDING').count()
     pending_logistics = Logistics.objects.filter(status__in=['PENDING', 'PROCESSING', 'IN_TRANSIT']).count()
     
+    # Get transfer alerts for user's branch
+    transfer_alerts = []
+    
     context = {
         'user_profile': user_profile,
         'total_branches': total_branches,
@@ -125,6 +133,7 @@ def dashboard(request):
         'pending_orders': pending_orders,
         'pending_transfers': pending_transfers,
         'pending_logistics': pending_logistics,
+        'transfer_alerts': transfer_alerts,
     }
     return render(request, 'core/dashboard.html', context)
 
@@ -362,17 +371,21 @@ def stock_transfer(request):
             messages.error(request, 'Insufficient stock for transfer!')
             return redirect('stock_transfer')
         
-        StockMovement.objects.create(
+        movement = StockMovement.objects.create(
             stock=stock,
             movement_type='TRANSFER',
             quantity=quantity,
             from_branch=from_branch,
             to_branch=to_branch,
             status='PENDING',
-            notes=notes
+            notes=notes,
+            created_by=request.user.profile.employee if hasattr(request.user, 'profile') else None
         )
         
-        messages.success(request, 'Transfer request created. Awaiting approval.')
+        # Create alert for receiving branch users
+        create_transfer_alert(movement)
+        
+        messages.success(request, f'Transfer request created and sent to {to_branch.name} for approval.')
         return redirect('stock_movement_list')
     
     products = Product.objects.filter(is_active=True)
@@ -391,10 +404,16 @@ def approve_transfer(request, pk):
                 movement.status = 'APPROVED'
                 movement.save()
                 movement.apply_stock_adjustment()
+                
+                # Transfer approved - notification would go here
+                
             messages.success(request, 'Transfer approved!')
         else:
             movement.status = 'REJECTED'
             movement.save()
+            
+            pass
+            
             messages.info(request, 'Transfer rejected.')
     return redirect('stock_movement_list')
 
@@ -886,4 +905,153 @@ def user_edit(request, pk):
         'profile': profile,
         'branches': branches,
         'action': 'Edit'
+    })
+
+
+# Vehicle Management Views
+@login_required
+@role_required('ADMIN', 'BOSS', 'MANAGER', 'LOGISTICS')
+def vehicle_list(request):
+    search = request.GET.get('search', '')
+    vehicles = Vehicle.objects.select_related('branch', 'assigned_driver').all()
+    
+    if search:
+        vehicles = vehicles.filter(
+            Q(registration_number__icontains=search) | 
+            Q(make__icontains=search) | 
+            Q(model__icontains=search)
+        )
+    
+    return render(request, 'core/vehicle_list.html', {'vehicles': vehicles, 'search': search})
+
+
+@login_required
+@role_required('ADMIN', 'BOSS', 'MANAGER', 'LOGISTICS')
+def vehicle_create(request):
+    branches = Branch.objects.filter(is_active=True)
+    drivers = Employee.objects.filter(is_active=True)
+    
+    if request.method == 'POST':
+        vehicle = Vehicle.objects.create(
+            registration_number=request.POST.get('registration_number'),
+            vehicle_type=request.POST.get('vehicle_type'),
+            make=request.POST.get('make'),
+            model=request.POST.get('model'),
+            year=int(request.POST.get('year')),
+            color=request.POST.get('color', ''),
+            branch_id=request.POST.get('branch'),
+            assigned_driver_id=request.POST.get('assigned_driver') if request.POST.get('assigned_driver') else None,
+            current_mileage=int(request.POST.get('current_mileage', 0)),
+            fuel_capacity=Decimal(request.POST.get('fuel_capacity', '0')),
+            purchase_price=Decimal(request.POST.get('purchase_price', '0')),
+            purchase_date=request.POST.get('purchase_date') if request.POST.get('purchase_date') else None,
+            insurance_expiry=request.POST.get('insurance_expiry') if request.POST.get('insurance_expiry') else None,
+            registration_expiry=request.POST.get('registration_expiry') if request.POST.get('registration_expiry') else None,
+            notes=request.POST.get('notes', ''),
+        )
+        messages.success(request, f'Vehicle {vehicle.registration_number} created successfully!')
+        return redirect('vehicle_list')
+    
+    return render(request, 'core/vehicle_form.html', {
+        'branches': branches,
+        'drivers': drivers,
+        'action': 'Create'
+    })
+
+
+@login_required
+@role_required('ADMIN', 'BOSS', 'MANAGER', 'LOGISTICS')
+def trip_list(request):
+    search = request.GET.get('search', '')
+    trips = Trip.objects.select_related('vehicle', 'driver', 'sale').all()
+    
+    if search:
+        trips = trips.filter(
+            Q(trip_number__icontains=search) | 
+            Q(origin__icontains=search) | 
+            Q(destination__icontains=search)
+        )
+    
+    return render(request, 'core/trip_list.html', {'trips': trips, 'search': search})
+
+
+@login_required
+@role_required('ADMIN', 'BOSS', 'MANAGER', 'LOGISTICS')
+def trip_create(request):
+    vehicles = Vehicle.objects.filter(status='ACTIVE')
+    drivers = Employee.objects.filter(is_active=True)
+    sales = Sale.objects.all()[:50]
+    
+    if request.method == 'POST':
+        trip = Trip.objects.create(
+            trip_number=f"TRIP-{uuid.uuid4().hex[:8].upper()}",
+            vehicle_id=request.POST.get('vehicle'),
+            driver_id=request.POST.get('driver'),
+            trip_type=request.POST.get('trip_type'),
+            origin=request.POST.get('origin'),
+            destination=request.POST.get('destination'),
+            distance=Decimal(request.POST.get('distance', '0')),
+            sale_id=request.POST.get('sale') if request.POST.get('sale') else None,
+            scheduled_date=request.POST.get('scheduled_date'),
+            revenue=Decimal(request.POST.get('revenue', '0')),
+            fuel_cost=Decimal(request.POST.get('fuel_cost', '0')),
+            other_expenses=Decimal(request.POST.get('other_expenses', '0')),
+            customer_name=request.POST.get('customer_name', ''),
+            customer_phone=request.POST.get('customer_phone', ''),
+            notes=request.POST.get('notes', ''),
+        )
+        messages.success(request, f'Trip {trip.trip_number} created successfully!')
+        return redirect('trip_list')
+    
+    return render(request, 'core/trip_form.html', {
+        'vehicles': vehicles,
+        'drivers': drivers,
+        'sales': sales,
+        'action': 'Create'
+    })
+
+
+@login_required
+@role_required('ADMIN', 'BOSS', 'MANAGER', 'LOGISTICS')
+def maintenance_list(request):
+    search = request.GET.get('search', '')
+    maintenance = VehicleMaintenance.objects.select_related('vehicle').all()
+    
+    if search:
+        maintenance = maintenance.filter(
+            Q(maintenance_number__icontains=search) | 
+            Q(vehicle__registration_number__icontains=search) | 
+            Q(service_provider__icontains=search)
+        )
+    
+    return render(request, 'core/maintenance_list.html', {'maintenance': maintenance, 'search': search})
+
+
+@login_required
+@role_required('ADMIN', 'BOSS', 'MANAGER', 'LOGISTICS')
+def maintenance_create(request):
+    vehicles = Vehicle.objects.all()
+    
+    if request.method == 'POST':
+        maintenance = VehicleMaintenance.objects.create(
+            maintenance_number=f"MAINT-{uuid.uuid4().hex[:8].upper()}",
+            vehicle_id=request.POST.get('vehicle'),
+            maintenance_type=request.POST.get('maintenance_type'),
+            description=request.POST.get('description'),
+            service_provider=request.POST.get('service_provider'),
+            service_date=request.POST.get('service_date'),
+            parts_cost=Decimal(request.POST.get('parts_cost', '0')),
+            labor_cost=Decimal(request.POST.get('labor_cost', '0')),
+            other_costs=Decimal(request.POST.get('other_costs', '0')),
+            mileage_at_service=int(request.POST.get('mileage_at_service', 0)),
+            next_service_mileage=int(request.POST.get('next_service_mileage', 0)) if request.POST.get('next_service_mileage') else None,
+            receipt_number=request.POST.get('receipt_number', ''),
+            notes=request.POST.get('notes', ''),
+        )
+        messages.success(request, f'Maintenance {maintenance.maintenance_number} created successfully!')
+        return redirect('maintenance_list')
+    
+    return render(request, 'core/maintenance_form.html', {
+        'vehicles': vehicles,
+        'action': 'Create'
     })

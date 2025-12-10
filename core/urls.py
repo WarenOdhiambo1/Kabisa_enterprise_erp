@@ -63,6 +63,18 @@ urlpatterns = [
     path('users/create/', views.user_create, name='user_create'),
     path('users/<int:pk>/edit/', views.user_edit, name='user_edit'),
     
+    # Vehicles
+    path('vehicles/', views.vehicle_list, name='vehicle_list'),
+    path('vehicles/create/', views.vehicle_create, name='vehicle_create'),
+    
+    # Trips
+    path('trips/', views.trip_list, name='trip_list'),
+    path('trips/create/', views.trip_create, name='trip_create'),
+    
+    # Maintenance
+    path('maintenance/', views.maintenance_list, name='maintenance_list'),
+    path('maintenance/create/', views.maintenance_create, name='maintenance_create'),
+    
     # API
     path('api/branch/<int:branch_id>/stocks/', views.get_branch_stocks, name='get_branch_stocks'),
 ]
