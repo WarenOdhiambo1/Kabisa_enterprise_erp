@@ -1,7 +1,8 @@
 from django.contrib import admin
 from .models import (
     Branch, Employee, Product, Stock, StockMovement, Order, OrderItem, 
-    Sale, SaleItem, UserProfile, Expense, Logistics, Vehicle, Trip, VehicleMaintenance
+    Sale, SaleItem, UserProfile, Expense, Logistics, Vehicle, Trip, VehicleMaintenance,
+    OrderFulfillment, OrderShipment, ShipmentItem, PaymentCollection
 )
 
 
@@ -182,3 +183,191 @@ class VehicleMaintenanceAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+
+class ShipmentItemInline(admin.TabularInline):
+    model = ShipmentItem
+    extra = 1
+    fields = ['order_item', 'quantity_ordered', 'quantity_delivered', 'quantity_remaining', 'unit_price', 'subtotal']
+    readonly_fields = ['subtotal']
+
+
+@admin.register(OrderFulfillment)
+class OrderFulfillmentAdmin(admin.ModelAdmin):
+    list_display = [
+        'fulfillment_number', 'order', 'branch', 'status', 
+        'fulfillment_percentage', 'payment_percentage',
+        'total_items_fulfilled', 'total_items_ordered',
+        'total_collected', 'total_order_value', 'created_at'
+    ]
+    list_filter = ['status', 'branch', 'created_at']
+    search_fields = ['fulfillment_number', 'order__order_number']
+    readonly_fields = [
+        'fulfillment_percentage', 'payment_percentage',
+        'total_items_ordered', 'total_items_fulfilled', 'total_items_remaining',
+        'total_collected', 'total_remaining', 'created_at', 'updated_at'
+    ]
+    date_hierarchy = 'created_at'
+    
+    fieldsets = (
+        ('Fulfillment Information', {
+            'fields': ('fulfillment_number', 'order', 'branch', 'status')
+        }),
+        ('Item Tracking', {
+            'fields': (
+                ('total_items_ordered', 'total_items_fulfilled', 'total_items_remaining'),
+                'fulfillment_percentage'
+            ),
+            'classes': ('wide',)
+        }),
+        ('Financial Tracking', {
+            'fields': (
+                ('total_order_value', 'total_collected', 'total_remaining'),
+                'payment_percentage'
+            ),
+            'classes': ('wide',)
+        }),
+        ('Additional Info', {
+            'fields': ('notes', 'created_by', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    actions = ['recalculate_fulfillment_status']
+    
+    def recalculate_fulfillment_status(self, request, queryset):
+        for fulfillment in queryset:
+            fulfillment.calculate_fulfillment_status()
+        self.message_user(request, f"Recalculated status for {queryset.count()} fulfillments")
+    recalculate_fulfillment_status.short_description = "Recalculate fulfillment status"
+
+
+@admin.register(OrderShipment)
+class OrderShipmentAdmin(admin.ModelAdmin):
+    list_display = [
+        'shipment_number', 'fulfillment', 'vehicle', 'driver', 
+        'status', 'items_loaded', 'vehicle_capacity',
+        'scheduled_date', 'actual_delivery_date', 'customer_name'
+    ]
+    list_filter = ['status', 'vehicle', 'scheduled_date', 'actual_delivery_date']
+    search_fields = ['shipment_number', 'customer_name', 'customer_phone', 'fulfillment__fulfillment_number']
+    readonly_fields = ['items_loaded', 'created_at', 'updated_at']
+    date_hierarchy = 'scheduled_date'
+    inlines = [ShipmentItemInline]
+    
+    fieldsets = (
+        ('Shipment Information', {
+            'fields': ('shipment_number', 'fulfillment', 'status')
+        }),
+        ('Vehicle & Capacity', {
+            'fields': (
+                ('vehicle', 'driver'),
+                ('vehicle_capacity', 'items_loaded'),
+                'trip'
+            )
+        }),
+        ('Schedule & Delivery', {
+            'fields': (
+                'scheduled_date',
+                'actual_delivery_date',
+                'customer_signature'
+            )
+        }),
+        ('Customer Details', {
+            'fields': ('customer_name', 'customer_phone', 'delivery_address')
+        }),
+        ('Financial', {
+            'fields': ('delivery_fee',)
+        }),
+        ('Additional Info', {
+            'fields': ('notes', 'created_by', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    actions = ['mark_as_delivered', 'assign_to_branch_stock']
+    
+    def mark_as_delivered(self, request, queryset):
+        queryset.update(status='DELIVERED')
+        self.message_user(request, f"Marked {queryset.count()} shipments as delivered")
+    mark_as_delivered.short_description = "Mark as delivered"
+    
+    def assign_to_branch_stock(self, request, queryset):
+        for shipment in queryset:
+            shipment.assign_to_branch_stock()
+        self.message_user(request, f"Assigned stock for {queryset.count()} shipments")
+    assign_to_branch_stock.short_description = "Assign products to branch stock"
+
+
+@admin.register(ShipmentItem)
+class ShipmentItemAdmin(admin.ModelAdmin):
+    list_display = [
+        'shipment', 'order_item', 
+        'quantity_ordered', 'quantity_delivered', 'quantity_remaining',
+        'unit_price', 'subtotal'
+    ]
+    list_filter = ['shipment__status', 'shipment__scheduled_date']
+    search_fields = ['shipment__shipment_number', 'order_item__product_name']
+    readonly_fields = ['subtotal', 'created_at']
+
+
+@admin.register(PaymentCollection)
+class PaymentCollectionAdmin(admin.ModelAdmin):
+    list_display = [
+        'payment_number', 'fulfillment', 'amount_collected',
+        'payment_method', 'status', 'is_deposited',
+        'deposited_to_branch', 'payment_date', 'is_outstanding'
+    ]
+    list_filter = [
+        'status', 'payment_method', 'is_deposited',
+        'payment_date', 'deposited_to_branch', 'branch'
+    ]
+    search_fields = ['payment_number', 'reference_number', 'receipt_number', 'fulfillment__fulfillment_number']
+    readonly_fields = ['is_outstanding', 'created_at', 'updated_at']
+    date_hierarchy = 'payment_date'
+    
+    fieldsets = (
+        ('Payment Information', {
+            'fields': (
+                'payment_number',
+                ('fulfillment', 'shipment'),
+                'branch'
+            )
+        }),
+        ('Payment Details', {
+            'fields': (
+                'amount_collected',
+                'payment_method',
+                'status',
+                'payment_date'
+            )
+        }),
+        ('Deposit Tracking', {
+            'fields': (
+                'is_deposited',
+                'deposited_to_branch',
+                'deposit_date',
+                'is_outstanding'
+            ),
+            'classes': ('wide',)
+        }),
+        ('References', {
+            'fields': ('reference_number', 'receipt_number')
+        }),
+        ('Additional Info', {
+            'fields': ('notes', 'collected_by', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    actions = ['mark_as_deposited', 'generate_payment_report']
+    
+    def mark_as_deposited(self, request, queryset):
+        queryset.update(is_deposited=True)
+        self.message_user(request, f"Marked {queryset.count()} payments as deposited")
+    mark_as_deposited.short_description = "Mark as deposited"
+    
+    def generate_payment_report(self, request, queryset):
+        # This will be implemented with Excel export functionality
+        self.message_user(request, f"Payment report generation not yet implemented")
+    generate_payment_report.short_description = "Generate payment report"

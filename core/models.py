@@ -743,134 +743,256 @@ class MonthlyProfitAnalysis(models.Model):
         self.save()
 
 
-class StockBatch(models.Model):
-    """Track individual batches of stock with their purchase prices"""
-    stock = models.ForeignKey(Stock, on_delete=models.CASCADE, related_name='batches')
-    batch_number = models.CharField(max_length=50)
-    quantity = models.IntegerField()
-    unit_purchase_price = models.DecimalField(max_digits=10, decimal_places=2)
-    order = models.ForeignKey(Order, on_delete=models.SET_NULL, null=True, blank=True)
-    received_date = models.DateTimeField(auto_now_add=True)
-    
-    class Meta:
-        ordering = ['received_date']
-    
-    def __str__(self):
-        return f"Batch {self.batch_number} - {self.stock.product.name}"
-
-
-class BrokenProduct(models.Model):
-    """Track broken/damaged products that affect profitability"""
-    DAMAGE_TYPES = [
-        ('BROKEN', 'Broken'),
-        ('EXPIRED', 'Expired'),
-        ('DAMAGED', 'Damaged'),
-        ('DEFECTIVE', 'Defective'),
-        ('LOST', 'Lost'),
-        ('STOLEN', 'Stolen'),
-        ('OTHER', 'Other'),
+class OrderFulfillment(models.Model):
+    """
+    Track order fulfillment with sophisticated partial delivery and vehicle capacity management.
+    An order can be fulfilled across multiple shipments based on vehicle capacity.
+    """
+    FULFILLMENT_STATUS = [
+        ('PENDING', 'Pending'),
+        ('PARTIALLY_FULFILLED', 'Partially Fulfilled'),
+        ('FULLY_FULFILLED', 'Fully Fulfilled'),
+        ('CANCELLED', 'Cancelled'),
     ]
     
-    stock = models.ForeignKey(Stock, on_delete=models.CASCADE, related_name='broken_items')
-    quantity = models.IntegerField()
-    damage_type = models.CharField(max_length=20, choices=DAMAGE_TYPES)
-    unit_cost = models.DecimalField(max_digits=10, decimal_places=2, help_text="Cost per unit when purchased")
-    description = models.TextField(blank=True)
-    reported_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
-    reported_date = models.DateTimeField(auto_now_add=True)
+    fulfillment_number = models.CharField(max_length=50, unique=True)
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='fulfillments')
+    branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='order_fulfillments')
+    status = models.CharField(max_length=30, choices=FULFILLMENT_STATUS, default='PENDING')
     
-    class Meta:
-        ordering = ['-reported_date']
+    # Capacity and tracking
+    total_items_ordered = models.IntegerField(default=0, help_text="Total items in the order")
+    total_items_fulfilled = models.IntegerField(default=0, help_text="Total items delivered so far")
+    total_items_remaining = models.IntegerField(default=0, help_text="Items still to be delivered")
     
-    def __str__(self):
-        return f"{self.damage_type}: {self.quantity} x {self.stock.product.name}"
+    # Financial tracking
+    total_order_value = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    total_collected = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), help_text="Total payments collected")
+    total_remaining = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), help_text="Outstanding balance")
     
-    @property
-    def total_loss(self):
-        return self.quantity * self.unit_cost
-    
-    def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-        # Reduce stock quantity
-        self.stock.quantity -= self.quantity
-        self.stock.save()
-        
-        # Create expense record for the loss
-        Expense.objects.create(
-            expense_number=f"LOSS-{self.id}",
-            branch=self.stock.branch,
-            expense_type='OTHER',
-            description=f"Product loss: {self.damage_type} - {self.stock.product.name}",
-            amount=self.total_loss,
-            expense_date=self.reported_date.date(),
-            notes=self.description,
-            created_by=self.reported_by
-        )
-
-
-class MonthlyProfitAnalysis(models.Model):
-    """Monthly profit analysis per product per branch"""
-    branch = models.ForeignKey(Branch, on_delete=models.CASCADE)
-    product = models.ForeignKey(Product, on_delete=models.CASCADE)
-    month = models.DateField(help_text="First day of the month")
-    
-    # Sales data
-    total_quantity_sold = models.IntegerField(default=0)
-    total_revenue = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
-    average_selling_price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
-    
-    # Cost data
-    weighted_avg_purchase_price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
-    total_purchase_cost = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
-    
-    # Losses
-    broken_quantity = models.IntegerField(default=0)
-    broken_cost = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
-    
-    # Expenses allocated to this product
-    allocated_expenses = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
-    
-    # Calculated fields
-    gross_profit = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
-    net_profit = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
-    profit_margin = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0.00'))
-    
-    # Stock turnover
-    opening_stock = models.IntegerField(default=0)
-    closing_stock = models.IntegerField(default=0)
-    stock_turnover_ratio = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal('0.00'))
-    
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
-        unique_together = ['branch', 'product', 'month']
-        ordering = ['-month', 'branch', 'product']
+        ordering = ['-created_at']
     
     def __str__(self):
-        return f"{self.product.name} @ {self.branch.name} - {self.month.strftime('%Y-%m')}"
+        return f"Fulfillment #{self.fulfillment_number} for Order #{self.order.order_number}"
     
-    def calculate_profit(self):
-        """Calculate all profit metrics"""
-        # Gross profit = Revenue - Cost of Goods Sold
-        self.gross_profit = self.total_revenue - self.total_purchase_cost
+    def calculate_fulfillment_status(self):
+        """Auto-calculate fulfillment progress"""
+        self.total_items_ordered = sum(item.quantity for item in self.order.items.all())
+        self.total_items_fulfilled = sum(
+            shipment_item.quantity_delivered 
+            for shipment in self.shipments.all() 
+            for shipment_item in shipment.items.all()
+        )
+        self.total_items_remaining = self.total_items_ordered - self.total_items_fulfilled
         
-        # Net profit = Gross profit - Allocated expenses - Losses
-        self.net_profit = self.gross_profit - self.allocated_expenses - self.broken_cost
+        # Calculate collected payments
+        self.total_collected = sum(
+            payment.amount_collected 
+            for payment in self.payments.filter(status='COMPLETED')
+        )
+        self.total_remaining = self.total_order_value - self.total_collected
         
-        # Profit margin
-        if self.total_revenue > 0:
-            self.profit_margin = (self.net_profit / self.total_revenue) * 100
+        # Update status
+        if self.total_items_fulfilled == 0:
+            self.status = 'PENDING'
+        elif self.total_items_fulfilled < self.total_items_ordered:
+            self.status = 'PARTIALLY_FULFILLED'
         else:
-            self.profit_margin = Decimal('0.00')
-        
-        # Stock turnover ratio
-        if self.opening_stock > 0:
-            avg_stock = (self.opening_stock + self.closing_stock) / 2
-            if avg_stock > 0:
-                self.stock_turnover_ratio = self.total_quantity_sold / avg_stock
+            self.status = 'FULLY_FULFILLED'
         
         self.save()
+    
+    @property
+    def fulfillment_percentage(self):
+        """Calculate percentage of order fulfilled"""
+        if self.total_items_ordered > 0:
+            return (self.total_items_fulfilled / self.total_items_ordered) * 100
+        return 0
+    
+    @property
+    def payment_percentage(self):
+        """Calculate percentage of payment collected"""
+        if self.total_order_value > 0:
+            return (self.total_collected / self.total_order_value) * 100
+        return 0
+
+
+class OrderShipment(models.Model):
+    """
+    Individual shipment within an order fulfillment.
+    Multiple shipments may be needed if vehicle capacity is limited.
+    """
+    SHIPMENT_STATUS = [
+        ('SCHEDULED', 'Scheduled'),
+        ('LOADING', 'Loading'),
+        ('IN_TRANSIT', 'In Transit'),
+        ('DELIVERED', 'Delivered'),
+        ('PARTIALLY_DELIVERED', 'Partially Delivered'),
+        ('FAILED', 'Failed'),
+        ('CANCELLED', 'Cancelled'),
+    ]
+    
+    shipment_number = models.CharField(max_length=50, unique=True)
+    fulfillment = models.ForeignKey(OrderFulfillment, on_delete=models.CASCADE, related_name='shipments')
+    
+    # Vehicle and capacity tracking
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.SET_NULL, null=True, blank=True, related_name='order_shipments')
+    driver = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True, related_name='order_shipments_driven')
+    vehicle_capacity = models.IntegerField(default=0, help_text="Maximum items this vehicle can carry")
+    items_loaded = models.IntegerField(default=0, help_text="Actual items loaded in this shipment")
+    
+    # Trip integration
+    trip = models.ForeignKey(Trip, on_delete=models.SET_NULL, null=True, blank=True, related_name='order_shipments')
+    
+    # Status and timing
+    status = models.CharField(max_length=30, choices=SHIPMENT_STATUS, default='SCHEDULED')
+    scheduled_date = models.DateTimeField()
+    actual_delivery_date = models.DateTimeField(null=True, blank=True)
+    
+    # Delivery details
+    delivery_address = models.TextField()
+    customer_name = models.CharField(max_length=200)
+    customer_phone = models.CharField(max_length=20)
+    customer_signature = models.BooleanField(default=False, help_text="Customer signed for delivery")
+    
+    # Financial
+    delivery_fee = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True, related_name='shipments_created')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-scheduled_date', '-created_at']
+    
+    def __str__(self):
+        return f"Shipment #{self.shipment_number} - {self.get_status_display()}"
+    
+    def calculate_items_loaded(self):
+        """Calculate total items loaded in this shipment"""
+        self.items_loaded = sum(item.quantity_delivered for item in self.items.all())
+        self.save()
+    
+    def assign_to_branch_stock(self):
+        """
+        When shipment is delivered, assign products to the destination branch.
+        This is crucial for orders where products are distributed to branches.
+        """
+        if self.status == 'DELIVERED':
+            destination_branch = self.fulfillment.branch
+            for shipment_item in self.items.all():
+                # Get or create stock at destination branch
+                stock, created = Stock.objects.get_or_create(
+                    branch=destination_branch,
+                    product=shipment_item.order_item.product,
+                    defaults={'quantity': 0}
+                )
+                # Add delivered quantity to branch stock
+                stock.quantity += shipment_item.quantity_delivered
+                stock.save()
+                
+                # Create stock movement record
+                StockMovement.objects.create(
+                    stock=stock,
+                    movement_type='IN',
+                    quantity=shipment_item.quantity_delivered,
+                    from_branch=self.fulfillment.order.branch,
+                    to_branch=destination_branch,
+                    status='APPROVED',
+                    notes=f"Delivered via Shipment #{self.shipment_number}",
+                    created_by=self.created_by
+                )
+
+
+class ShipmentItem(models.Model):
+    """
+    Individual items within a shipment. Tracks what was delivered in each trip.
+    """
+    shipment = models.ForeignKey(OrderShipment, on_delete=models.CASCADE, related_name='items')
+    order_item = models.ForeignKey(OrderItem, on_delete=models.CASCADE, related_name='shipment_deliveries')
+    
+    quantity_ordered = models.IntegerField(help_text="Original quantity ordered")
+    quantity_delivered = models.IntegerField(help_text="Quantity delivered in this shipment")
+    quantity_remaining = models.IntegerField(help_text="Quantity still to be delivered")
+    
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['id']
+    
+    def __str__(self):
+        return f"{self.order_item.product_name} - {self.quantity_delivered}/{self.quantity_ordered} delivered"
+    
+    @property
+    def subtotal(self):
+        return self.quantity_delivered * self.unit_price
+
+
+class PaymentCollection(models.Model):
+    """
+    Track payments collected from customers for order fulfillments.
+    Payments can be collected partially across multiple deliveries.
+    """
+    PAYMENT_STATUS = [
+        ('PENDING', 'Pending'),
+        ('COMPLETED', 'Completed'),
+        ('FAILED', 'Failed'),
+        ('REFUNDED', 'Refunded'),
+    ]
+    
+    PAYMENT_METHODS = [
+        ('CASH', 'Cash'),
+        ('BANK_TRANSFER', 'Bank Transfer'),
+        ('MOBILE_MONEY', 'Mobile Money'),
+        ('CHEQUE', 'Cheque'),
+        ('CARD', 'Credit/Debit Card'),
+        ('OTHER', 'Other'),
+    ]
+    
+    payment_number = models.CharField(max_length=50, unique=True)
+    fulfillment = models.ForeignKey(OrderFulfillment, on_delete=models.CASCADE, related_name='payments')
+    shipment = models.ForeignKey(OrderShipment, on_delete=models.SET_NULL, null=True, blank=True, related_name='payments', help_text="Payment collected during this shipment")
+    branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='payment_collections')
+    
+    # Payment details
+    amount_collected = models.DecimalField(max_digits=12, decimal_places=2, help_text="Amount collected in this payment")
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHODS, default='CASH')
+    status = models.CharField(max_length=20, choices=PAYMENT_STATUS, default='PENDING')
+    
+    # Tracking
+    payment_date = models.DateTimeField()
+    deposited_to_branch = models.ForeignKey(Branch, on_delete=models.SET_NULL, null=True, blank=True, related_name='deposits_received', help_text="Which branch received this money")
+    deposit_date = models.DateTimeField(null=True, blank=True, help_text="When was money deposited to branch")
+    is_deposited = models.BooleanField(default=False, help_text="Has this payment been deposited to a branch?")
+    
+    # Reference
+    reference_number = models.CharField(max_length=100, blank=True, help_text="Transaction ID, cheque number, etc.")
+    receipt_number = models.CharField(max_length=100, blank=True)
+    
+    notes = models.TextField(blank=True)
+    collected_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True, related_name='payments_collected')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-payment_date', '-created_at']
+    
+    def __str__(self):
+        return f"Payment #{self.payment_number} - {self.amount_collected} ({self.get_payment_method_display()})"
+    
+    @property
+    def is_outstanding(self):
+        """Check if payment is outstanding (collected but not deposited)"""
+        return self.status == 'COMPLETED' and not self.is_deposited
 
 
 class Logistics(models.Model):
