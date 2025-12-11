@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from . import analytics_views
 
 urlpatterns = [
     # Authentication
@@ -77,4 +78,15 @@ urlpatterns = [
     
     # API
     path('api/branch/<int:branch_id>/stocks/', views.get_branch_stocks, name='get_branch_stocks'),
+    
+    # Financial Analytics API
+    path('analytics/', analytics_views.analytics_dashboard, name='analytics_dashboard'),
+    path('api/analytics/dashboard/', analytics_views.financial_dashboard_api, name='financial_dashboard_api'),
+    path('api/analytics/forecast/', analytics_views.sales_forecast_api, name='sales_forecast_api'),
+    path('api/analytics/inventory/', analytics_views.inventory_optimization_api, name='inventory_optimization_api'),
+    path('api/analytics/risk/', analytics_views.risk_assessment_api, name='risk_assessment_api'),
+    path('api/analytics/routes/', analytics_views.route_optimization_api, name='route_optimization_api'),
+    path('api/analytics/profitability/', analytics_views.profitability_analysis_api, name='profitability_analysis_api'),
+    path('api/analytics/metadata/', analytics_views.analytics_metadata, name='analytics_metadata'),
+    path('api/analytics/report/excel/', analytics_views.generate_excel_report, name='generate_excel_report'),
 ]

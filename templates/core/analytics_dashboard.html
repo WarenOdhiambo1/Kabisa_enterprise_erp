@@ -1,0 +1,735 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Financial Analytics Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+    body {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    
+    .analytics-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px 0;
+        margin-bottom: 30px;
+        border-radius: 0 0 20px 20px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    }
+    
+    .analytics-header h1 {
+        font-size: 2.5rem;
+        font-weight: 300;
+        margin: 0;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    .analytics-controls {
+        background: rgba(255,255,255,0.1);
+        padding: 15px;
+        border-radius: 10px;
+        margin-top: 20px;
+    }
+    
+    .analytics-card {
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+        padding: 25px;
+        margin-bottom: 25px;
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        border: 1px solid rgba(255,255,255,0.2);
+    }
+    
+    .analytics-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 35px rgba(0,0,0,0.15);
+    }
+    
+    .metric-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 15px;
+        padding: 25px;
+        text-align: center;
+        margin-bottom: 20px;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .metric-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+        transition: left 0.5s;
+    }
+    
+    .metric-card:hover::before {
+        left: 100%;
+    }
+    
+    .metric-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    }
+    
+    .metric-value {
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin-bottom: 8px;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    .metric-label {
+        font-size: 1rem;
+        opacity: 0.9;
+        font-weight: 500;
+        letter-spacing: 0.5px;
+    }
+    
+    .loading-spinner {
+        display: inline-block;
+        width: 24px;
+        height: 24px;
+        border: 3px solid rgba(255,255,255,0.3);
+        border-top: 3px solid #ffffff;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    .risk-high { 
+        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+        box-shadow: 0 8px 25px rgba(255, 107, 107, 0.3);
+    }
+    .risk-medium { 
+        background: linear-gradient(135deg, #feca57 0%, #ff9ff3 100%);
+        box-shadow: 0 8px 25px rgba(254, 202, 87, 0.3);
+    }
+    .risk-low { 
+        background: linear-gradient(135deg, #48dbfb 0%, #0abde3 100%);
+        box-shadow: 0 8px 25px rgba(72, 219, 251, 0.3);
+    }
+    
+    .forecast-chart {
+        height: 350px;
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        border-radius: 15px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #6c757d;
+        border: 2px dashed #dee2e6;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .forecast-chart::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(circle, rgba(102, 126, 234, 0.1) 0%, transparent 70%);
+        animation: pulse 3s ease-in-out infinite;
+    }
+    
+    @keyframes pulse {
+        0%, 100% { transform: scale(1); opacity: 0.5; }
+        50% { transform: scale(1.1); opacity: 0.8; }
+    }
+    
+    .btn-analytics {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border: none;
+        color: white;
+        padding: 12px 25px;
+        border-radius: 25px;
+        margin: 8px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    }
+    
+    .btn-analytics:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        color: white;
+    }
+    
+    .card-title {
+        font-size: 1.3rem;
+        font-weight: 600;
+        margin-bottom: 20px;
+        color: #2c3e50;
+    }
+    
+    .card-title i {
+        margin-right: 10px;
+        font-size: 1.1em;
+    }
+    
+    .form-select, .form-control {
+        border-radius: 10px;
+        border: 2px solid #e9ecef;
+        padding: 10px 15px;
+        transition: all 0.3s ease;
+    }
+    
+    .form-select:focus, .form-control:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+    }
+    
+    .analytics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 25px;
+        margin-top: 30px;
+    }
+    
+    .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+    }
+    
+    .status-indicator {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-right: 8px;
+        animation: blink 2s infinite;
+    }
+    
+    @keyframes blink {
+        0%, 50% { opacity: 1; }
+        51%, 100% { opacity: 0.3; }
+    }
+    
+    .status-online { background-color: #28a745; }
+    .status-warning { background-color: #ffc107; }
+    .status-error { background-color: #dc3545; }
+    
+    .data-table {
+        background: white;
+        border-radius: 15px;
+        overflow: hidden;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+    }
+    
+    .table th {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        font-weight: 600;
+        padding: 15px;
+    }
+    
+    .table td {
+        padding: 12px 15px;
+        border-color: #f8f9fa;
+    }
+    
+    .progress-modern {
+        height: 8px;
+        border-radius: 10px;
+        background: #e9ecef;
+        overflow: hidden;
+    }
+    
+    .progress-bar-modern {
+        height: 100%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 10px;
+        transition: width 0.6s ease;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="analytics-header">
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-12 text-center">
+                <h1><i class="fas fa-chart-line me-3"></i>Financial Analytics Dashboard</h1>
+                <p class="lead mb-0">Enterprise-grade financial intelligence powered by Fortune 500 algorithms</p>
+                
+                <div class="analytics-controls">
+                    <div class="row justify-content-center">
+                        <div class="col-auto">
+                            <label class="form-label text-white-50">Branch</label>
+                            <select id="branchSelect" class="form-select">
+                                <option value="">🏢 All Branches</option>
+                                {% for branch in branches %}
+                                <option value="{{ branch.id }}">{{ branch.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-auto">
+                            <label class="form-label text-white-50">Period</label>
+                            <select id="periodSelect" class="form-select">
+                                <option value="30">📅 Last 30 Days</option>
+                                <option value="90">📊 Last 3 Months</option>
+                                <option value="365" selected>📈 Last Year</option>
+                                <option value="730">🎯 Last 2 Years</option>
+                            </select>
+                        </div>
+                        <div class="col-auto align-self-end">
+                            <button id="refreshBtn" class="btn btn-analytics">
+                                <i class="fas fa-sync-alt me-2"></i>Refresh Analytics
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container-fluid">
+
+    <!-- Key Metrics Row -->
+    <div class="metric-grid" id="metricsRow">
+        <div class="metric-card">
+            <i class="fas fa-dollar-sign fa-2x mb-3" style="opacity: 0.7;"></i>
+            <div class="metric-value" id="totalRevenue">
+                <span class="loading-spinner"></span>
+            </div>
+            <div class="metric-label">💰 Total Revenue</div>
+            <div class="status-indicator status-online"></div>
+        </div>
+        
+        <div class="metric-card">
+            <i class="fas fa-chart-line fa-2x mb-3" style="opacity: 0.7;"></i>
+            <div class="metric-value" id="netProfit">
+                <span class="loading-spinner"></span>
+            </div>
+            <div class="metric-label">💹 Net Profit</div>
+            <div class="status-indicator status-online"></div>
+        </div>
+        
+        <div class="metric-card">
+            <i class="fas fa-percentage fa-2x mb-3" style="opacity: 0.7;"></i>
+            <div class="metric-value" id="profitMargin">
+                <span class="loading-spinner"></span>
+            </div>
+            <div class="metric-label">📈 Profit Margin</div>
+            <div class="status-indicator status-online"></div>
+        </div>
+        
+        <div class="metric-card" id="riskCard">
+            <i class="fas fa-shield-alt fa-2x mb-3" style="opacity: 0.7;"></i>
+            <div class="metric-value" id="riskLevel">
+                <span class="loading-spinner"></span>
+            </div>
+            <div class="metric-label">⚠️ Risk Level</div>
+            <div class="status-indicator status-warning"></div>
+        </div>
+    </div>
+
+    <!-- Analytics Cards Row -->
+    <div class="analytics-grid">
+        <!-- Sales Forecast -->
+        <div class="analytics-card">
+            <h5 class="card-title">
+                <i class="fas fa-chart-line text-primary"></i> AI Sales Forecast
+                <span class="badge bg-success ms-2">Prophet ML</span>
+            </h5>
+            <div id="forecastChart" class="forecast-chart">
+                <div class="text-center">
+                    <div class="loading-spinner mb-3"></div>
+                    <div><strong>Loading forecast data...</strong></div>
+                    <small class="text-muted">Analyzing 30-day predictions</small>
+                </div>
+            </div>
+            <div class="mt-3 d-flex justify-content-between align-items-center">
+                <small class="text-muted">
+                    <i class="fas fa-robot me-1"></i>Powered by Facebook's Prophet Algorithm
+                </small>
+                <div class="progress-modern" style="width: 100px;">
+                    <div class="progress-bar-modern" style="width: 85%;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Risk Assessment -->
+        <div class="analytics-card">
+            <h5 class="card-title">
+                <i class="fas fa-shield-alt text-warning"></i> Risk Assessment
+                <span class="badge bg-warning ms-2">VaR Model</span>
+            </h5>
+            <div id="riskMetrics">
+                <div class="text-center">
+                    <div class="loading-spinner mb-3"></div>
+                    <div><strong>Calculating risk metrics...</strong></div>
+                    <small class="text-muted">Monte Carlo simulation in progress</small>
+                </div>
+            </div>
+            <div class="mt-3 d-flex justify-content-between align-items-center">
+                <small class="text-muted">
+                    <i class="fas fa-calculator me-1"></i>Value at Risk (VaR) Analysis
+                </small>
+                <div class="progress-modern" style="width: 100px;">
+                    <div class="progress-bar-modern" style="width: 70%;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inventory & Routes Row -->
+    <div class="analytics-grid">
+        <!-- Inventory Optimization -->
+        <div class="analytics-card">
+            <h5 class="card-title">
+                <i class="fas fa-boxes text-success"></i> Smart Inventory
+                <span class="badge bg-info ms-2">EOQ Model</span>
+            </h5>
+            <div id="inventoryData">
+                <div class="text-center">
+                    <div class="loading-spinner mb-3"></div>
+                    <div><strong>Optimizing inventory levels...</strong></div>
+                    <small class="text-muted">Calculating Economic Order Quantities</small>
+                </div>
+            </div>
+            <div class="mt-3 d-flex justify-content-between align-items-center">
+                <small class="text-muted">
+                    <i class="fas fa-warehouse me-1"></i>Amazon & Walmart Algorithm
+                </small>
+                <div class="progress-modern" style="width: 100px;">
+                    <div class="progress-bar-modern" style="width: 92%;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Route Optimization -->
+        <div class="analytics-card">
+            <h5 class="card-title">
+                <i class="fas fa-route text-info"></i> Route Optimization
+                <span class="badge bg-primary ms-2">Linear Programming</span>
+            </h5>
+            <div id="routeData">
+                <div class="text-center">
+                    <div class="loading-spinner mb-3"></div>
+                    <div><strong>Optimizing delivery routes...</strong></div>
+                    <small class="text-muted">Minimizing fuel costs & distance</small>
+                </div>
+            </div>
+            <div class="mt-3 d-flex justify-content-between align-items-center">
+                <small class="text-muted">
+                    <i class="fas fa-truck me-1"></i>UPS & FedEx Algorithm
+                </small>
+                <div class="progress-modern" style="width: 100px;">
+                    <div class="progress-bar-modern" style="width: 78%;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Options -->
+    <div class="analytics-card">
+        <h5 class="card-title">
+            <i class="fas fa-download text-secondary"></i> Professional Reports
+            <span class="badge bg-secondary ms-2">Investment Grade</span>
+        </h5>
+        <p class="text-muted mb-4">
+            Generate Fortune 500 quality financial reports with advanced analytics
+        </p>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <button id="exportExcelBtn" class="btn btn-analytics w-100">
+                    <i class="fas fa-file-excel me-2"></i>Excel Report
+                </button>
+            </div>
+            <div class="col-md-6">
+                <button id="exportPdfBtn" class="btn btn-outline-secondary w-100" disabled>
+                    <i class="fas fa-file-pdf me-2"></i>PDF Report (Soon)
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+class FinancialAnalytics {
+    constructor() {
+        this.baseUrl = '/api/analytics/';
+        this.init();
+    }
+
+    init() {
+        this.bindEvents();
+        this.loadAnalytics();
+    }
+
+    bindEvents() {
+        document.getElementById('refreshBtn').addEventListener('click', () => {
+            this.loadAnalytics();
+        });
+
+        document.getElementById('branchSelect').addEventListener('change', () => {
+            this.loadAnalytics();
+        });
+
+        document.getElementById('periodSelect').addEventListener('change', () => {
+            this.loadAnalytics();
+        });
+
+        document.getElementById('exportExcelBtn').addEventListener('click', () => {
+            this.exportExcel();
+        });
+    }
+
+    async loadAnalytics() {
+        try {
+            this.showLoading();
+            
+            const params = new URLSearchParams({
+                branch: document.getElementById('branchSelect').value,
+                days: document.getElementById('periodSelect').value
+            });
+
+            const response = await fetch(`${this.baseUrl}dashboard/?${params}`);
+            const data = await response.json();
+
+            if (data.success) {
+                this.updateMetrics(data.data);
+                this.updateForecast(data.data.forecast);
+                this.updateRiskAssessment(data.data.risk);
+                this.updateInventory(data.data.inventory);
+                this.updateRoutes(data.data.routes);
+            } else {
+                this.showError(data.message || 'Failed to load analytics');
+            }
+        } catch (error) {
+            console.error('Analytics loading error:', error);
+            this.showError('Network error occurred');
+        }
+    }
+
+    updateMetrics(data) {
+        const profitability = data.profitability || {};
+        
+        document.getElementById('totalRevenue').textContent = 
+            this.formatCurrency(profitability.total_revenue || 0);
+        
+        document.getElementById('netProfit').textContent = 
+            this.formatCurrency(profitability.net_profit || 0);
+        
+        document.getElementById('profitMargin').textContent = 
+            this.formatPercent(profitability.profit_margin || 0);
+
+        // Update risk level
+        const risk = data.risk || {};
+        const riskLevel = risk.risk_level || 'UNKNOWN';
+        const riskCard = document.getElementById('riskCard');
+        
+        document.getElementById('riskLevel').textContent = riskLevel;
+        
+        // Update risk card color
+        riskCard.className = 'metric-card';
+        if (riskLevel === 'HIGH') {
+            riskCard.classList.add('risk-high');
+        } else if (riskLevel === 'MEDIUM') {
+            riskCard.classList.add('risk-medium');
+        } else {
+            riskCard.classList.add('risk-low');
+        }
+    }
+
+    updateForecast(forecast) {
+        const chartDiv = document.getElementById('forecastChart');
+        
+        if (forecast && forecast.predicted_sales) {
+            const totalPredicted = this.formatCurrency(forecast.total_predicted || 0);
+            chartDiv.innerHTML = `
+                <div class="text-center">
+                    <h4 class="text-primary">${totalPredicted}</h4>
+                    <p class="mb-0">Predicted Revenue (30 Days)</p>
+                    <small class="text-muted">Based on ${forecast.forecast_dates?.length || 0} data points</small>
+                </div>
+            `;
+        } else {
+            chartDiv.innerHTML = `
+                <div class="text-center text-muted">
+                    <i class="fas fa-chart-line fa-3x mb-3"></i>
+                    <p>Insufficient data for forecasting</p>
+                </div>
+            `;
+        }
+    }
+
+    updateRiskAssessment(risk) {
+        const riskDiv = document.getElementById('riskMetrics');
+        
+        if (risk && risk.value_at_risk_95 !== undefined) {
+            riskDiv.innerHTML = `
+                <div class="row text-center">
+                    <div class="col-6">
+                        <h6>Value at Risk (95%)</h6>
+                        <p class="h5 text-danger">${this.formatCurrency(risk.value_at_risk_95)}</p>
+                    </div>
+                    <div class="col-6">
+                        <h6>Sharpe Ratio</h6>
+                        <p class="h5 text-info">${(risk.sharpe_ratio || 0).toFixed(2)}</p>
+                    </div>
+                    <div class="col-6">
+                        <h6>Max Drawdown</h6>
+                        <p class="h6 text-warning">${this.formatCurrency(risk.maximum_drawdown || 0)}</p>
+                    </div>
+                    <div class="col-6">
+                        <h6>Loss Probability</h6>
+                        <p class="h6">${(risk.probability_of_loss_pct || 0).toFixed(1)}%</p>
+                    </div>
+                </div>
+            `;
+        } else {
+            riskDiv.innerHTML = `
+                <div class="text-center text-muted">
+                    <i class="fas fa-shield-alt fa-3x mb-3"></i>
+                    <p>Insufficient data for risk analysis</p>
+                </div>
+            `;
+        }
+    }
+
+    updateInventory(inventory) {
+        const inventoryDiv = document.getElementById('inventoryData');
+        
+        if (inventory && inventory.total_items_analyzed) {
+            inventoryDiv.innerHTML = `
+                <div class="row text-center">
+                    <div class="col-6">
+                        <h6>Items Analyzed</h6>
+                        <p class="h5 text-primary">${inventory.total_items_analyzed}</p>
+                    </div>
+                    <div class="col-6">
+                        <h6>Need Reorder</h6>
+                        <p class="h5 text-warning">${inventory.items_needing_reorder || 0}</p>
+                    </div>
+                    <div class="col-12">
+                        <h6>Investment Needed</h6>
+                        <p class="h5 text-success">${this.formatCurrency(inventory.total_investment_needed || 0)}</p>
+                    </div>
+                </div>
+            `;
+        } else {
+            inventoryDiv.innerHTML = `
+                <div class="text-center text-muted">
+                    <i class="fas fa-boxes fa-3x mb-3"></i>
+                    <p>No inventory data available</p>
+                </div>
+            `;
+        }
+    }
+
+    updateRoutes(routes) {
+        const routeDiv = document.getElementById('routeData');
+        
+        if (routes && routes.total_trips !== undefined) {
+            routeDiv.innerHTML = `
+                <div class="row text-center">
+                    <div class="col-6">
+                        <h6>Total Trips</h6>
+                        <p class="h5 text-primary">${routes.total_trips}</p>
+                    </div>
+                    <div class="col-6">
+                        <h6>Total Distance</h6>
+                        <p class="h5 text-info">${(routes.total_distance_km || 0).toFixed(1)} km</p>
+                    </div>
+                    <div class="col-6">
+                        <h6>Total Profit</h6>
+                        <p class="h5 text-success">${this.formatCurrency(routes.total_profit || 0)}</p>
+                    </div>
+                    <div class="col-6">
+                        <h6>Profit/km</h6>
+                        <p class="h5">${this.formatCurrency(routes.profit_per_km || 0)}</p>
+                    </div>
+                </div>
+            `;
+        } else {
+            routeDiv.innerHTML = `
+                <div class="text-center text-muted">
+                    <i class="fas fa-route fa-3x mb-3"></i>
+                    <p>${routes?.message || 'No route data available'}</p>
+                </div>
+            `;
+        }
+    }
+
+    showLoading() {
+        const elements = ['totalRevenue', 'netProfit', 'profitMargin', 'riskLevel'];
+        elements.forEach(id => {
+            document.getElementById(id).innerHTML = '<span class="loading-spinner"></span>';
+        });
+    }
+
+    showError(message) {
+        console.error('Analytics error:', message);
+        // You could show a toast notification here
+    }
+
+    async exportExcel() {
+        try {
+            const params = new URLSearchParams({
+                branch: document.getElementById('branchSelect').value,
+                days: document.getElementById('periodSelect').value
+            });
+
+            const response = await fetch(`${this.baseUrl}report/excel/?${params}`);
+            
+            if (response.ok) {
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `kabisa_financial_report_${new Date().toISOString().split('T')[0]}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+            } else {
+                throw new Error('Export failed');
+            }
+        } catch (error) {
+            console.error('Export error:', error);
+            alert('Export failed. Please try again.');
+        }
+    }
+
+    formatCurrency(amount) {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD'
+        }).format(amount);
+    }
+
+    formatPercent(value) {
+        return `${value.toFixed(1)}%`;
+    }
+}
+
+// Initialize when page loads
+document.addEventListener('DOMContentLoaded', () => {
+    new FinancialAnalytics();
+});
+</script>
+{% endblock %}
