@@ -66,6 +66,8 @@ class Stock(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='stocks')
     quantity = models.IntegerField(default=0)
     min_quantity = models.IntegerField(default=10)
+    # Track weighted average purchase price for profit calculation
+    weighted_avg_purchase_price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -79,6 +81,17 @@ class Stock(models.Model):
     @property
     def is_low_stock(self):
         return self.quantity <= self.min_quantity
+    
+    def update_purchase_price(self, new_quantity, new_unit_price):
+        """Update weighted average purchase price when new stock arrives"""
+        if self.quantity == 0:
+            self.weighted_avg_purchase_price = new_unit_price
+        else:
+            total_value = (self.quantity * self.weighted_avg_purchase_price) + (new_quantity * new_unit_price)
+            total_quantity = self.quantity + new_quantity
+            self.weighted_avg_purchase_price = total_value / total_quantity if total_quantity > 0 else Decimal('0.00')
+        self.quantity += new_quantity
+        self.save()
 
 
 class StockMovement(models.Model):
@@ -598,6 +611,266 @@ class VehicleMaintenance(models.Model):
                         notes=f"Parts: {self.parts_cost}, Labor: {self.labor_cost}, Other: {self.other_costs}",
                         created_by=self.created_by
                     )
+
+
+class StockBatch(models.Model):
+    """Track individual batches of stock with their purchase prices"""
+    stock = models.ForeignKey(Stock, on_delete=models.CASCADE, related_name='batches')
+    batch_number = models.CharField(max_length=50)
+    quantity = models.IntegerField()
+    unit_purchase_price = models.DecimalField(max_digits=10, decimal_places=2)
+    order = models.ForeignKey(Order, on_delete=models.SET_NULL, null=True, blank=True)
+    received_date = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['received_date']
+    
+    def __str__(self):
+        return f"Batch {self.batch_number} - {self.stock.product.name}"
+
+
+class BrokenProduct(models.Model):
+    """Track broken/damaged products that affect profitability"""
+    DAMAGE_TYPES = [
+        ('BROKEN', 'Broken'),
+        ('EXPIRED', 'Expired'),
+        ('DAMAGED', 'Damaged'),
+        ('DEFECTIVE', 'Defective'),
+        ('LOST', 'Lost'),
+        ('STOLEN', 'Stolen'),
+        ('OTHER', 'Other'),
+    ]
+    
+    stock = models.ForeignKey(Stock, on_delete=models.CASCADE, related_name='broken_items')
+    quantity = models.IntegerField()
+    damage_type = models.CharField(max_length=20, choices=DAMAGE_TYPES)
+    unit_cost = models.DecimalField(max_digits=10, decimal_places=2, help_text="Cost per unit when purchased")
+    description = models.TextField(blank=True)
+    reported_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
+    reported_date = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-reported_date']
+    
+    def __str__(self):
+        return f"{self.damage_type}: {self.quantity} x {self.stock.product.name}"
+    
+    @property
+    def total_loss(self):
+        return self.quantity * self.unit_cost
+    
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Reduce stock quantity
+        self.stock.quantity -= self.quantity
+        self.stock.save()
+        
+        # Create expense record for the loss
+        Expense.objects.create(
+            expense_number=f"LOSS-{self.id}",
+            branch=self.stock.branch,
+            expense_type='OTHER',
+            description=f"Product loss: {self.damage_type} - {self.stock.product.name}",
+            amount=self.total_loss,
+            expense_date=self.reported_date.date(),
+            notes=self.description,
+            created_by=self.reported_by
+        )
+
+
+class MonthlyProfitAnalysis(models.Model):
+    """Monthly profit analysis per product per branch"""
+    branch = models.ForeignKey(Branch, on_delete=models.CASCADE)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    month = models.DateField(help_text="First day of the month")
+    
+    # Sales data
+    total_quantity_sold = models.IntegerField(default=0)
+    total_revenue = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    average_selling_price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    
+    # Cost data
+    weighted_avg_purchase_price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    total_purchase_cost = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    
+    # Losses
+    broken_quantity = models.IntegerField(default=0)
+    broken_cost = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    
+    # Expenses allocated to this product
+    allocated_expenses = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    
+    # Calculated fields
+    gross_profit = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    net_profit = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    profit_margin = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0.00'))
+    
+    # Stock turnover
+    opening_stock = models.IntegerField(default=0)
+    closing_stock = models.IntegerField(default=0)
+    stock_turnover_ratio = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal('0.00'))
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ['branch', 'product', 'month']
+        ordering = ['-month', 'branch', 'product']
+    
+    def __str__(self):
+        return f"{self.product.name} @ {self.branch.name} - {self.month.strftime('%Y-%m')}"
+    
+    def calculate_profit(self):
+        """Calculate all profit metrics"""
+        # Gross profit = Revenue - Cost of Goods Sold
+        self.gross_profit = self.total_revenue - self.total_purchase_cost
+        
+        # Net profit = Gross profit - Allocated expenses - Losses
+        self.net_profit = self.gross_profit - self.allocated_expenses - self.broken_cost
+        
+        # Profit margin
+        if self.total_revenue > 0:
+            self.profit_margin = (self.net_profit / self.total_revenue) * 100
+        else:
+            self.profit_margin = Decimal('0.00')
+        
+        # Stock turnover ratio
+        if self.opening_stock > 0:
+            avg_stock = (self.opening_stock + self.closing_stock) / 2
+            if avg_stock > 0:
+                self.stock_turnover_ratio = self.total_quantity_sold / avg_stock
+        
+        self.save()
+
+
+class StockBatch(models.Model):
+    """Track individual batches of stock with their purchase prices"""
+    stock = models.ForeignKey(Stock, on_delete=models.CASCADE, related_name='batches')
+    batch_number = models.CharField(max_length=50)
+    quantity = models.IntegerField()
+    unit_purchase_price = models.DecimalField(max_digits=10, decimal_places=2)
+    order = models.ForeignKey(Order, on_delete=models.SET_NULL, null=True, blank=True)
+    received_date = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['received_date']
+    
+    def __str__(self):
+        return f"Batch {self.batch_number} - {self.stock.product.name}"
+
+
+class BrokenProduct(models.Model):
+    """Track broken/damaged products that affect profitability"""
+    DAMAGE_TYPES = [
+        ('BROKEN', 'Broken'),
+        ('EXPIRED', 'Expired'),
+        ('DAMAGED', 'Damaged'),
+        ('DEFECTIVE', 'Defective'),
+        ('LOST', 'Lost'),
+        ('STOLEN', 'Stolen'),
+        ('OTHER', 'Other'),
+    ]
+    
+    stock = models.ForeignKey(Stock, on_delete=models.CASCADE, related_name='broken_items')
+    quantity = models.IntegerField()
+    damage_type = models.CharField(max_length=20, choices=DAMAGE_TYPES)
+    unit_cost = models.DecimalField(max_digits=10, decimal_places=2, help_text="Cost per unit when purchased")
+    description = models.TextField(blank=True)
+    reported_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
+    reported_date = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-reported_date']
+    
+    def __str__(self):
+        return f"{self.damage_type}: {self.quantity} x {self.stock.product.name}"
+    
+    @property
+    def total_loss(self):
+        return self.quantity * self.unit_cost
+    
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Reduce stock quantity
+        self.stock.quantity -= self.quantity
+        self.stock.save()
+        
+        # Create expense record for the loss
+        Expense.objects.create(
+            expense_number=f"LOSS-{self.id}",
+            branch=self.stock.branch,
+            expense_type='OTHER',
+            description=f"Product loss: {self.damage_type} - {self.stock.product.name}",
+            amount=self.total_loss,
+            expense_date=self.reported_date.date(),
+            notes=self.description,
+            created_by=self.reported_by
+        )
+
+
+class MonthlyProfitAnalysis(models.Model):
+    """Monthly profit analysis per product per branch"""
+    branch = models.ForeignKey(Branch, on_delete=models.CASCADE)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    month = models.DateField(help_text="First day of the month")
+    
+    # Sales data
+    total_quantity_sold = models.IntegerField(default=0)
+    total_revenue = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    average_selling_price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    
+    # Cost data
+    weighted_avg_purchase_price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    total_purchase_cost = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    
+    # Losses
+    broken_quantity = models.IntegerField(default=0)
+    broken_cost = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    
+    # Expenses allocated to this product
+    allocated_expenses = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    
+    # Calculated fields
+    gross_profit = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    net_profit = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    profit_margin = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal('0.00'))
+    
+    # Stock turnover
+    opening_stock = models.IntegerField(default=0)
+    closing_stock = models.IntegerField(default=0)
+    stock_turnover_ratio = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal('0.00'))
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ['branch', 'product', 'month']
+        ordering = ['-month', 'branch', 'product']
+    
+    def __str__(self):
+        return f"{self.product.name} @ {self.branch.name} - {self.month.strftime('%Y-%m')}"
+    
+    def calculate_profit(self):
+        """Calculate all profit metrics"""
+        # Gross profit = Revenue - Cost of Goods Sold
+        self.gross_profit = self.total_revenue - self.total_purchase_cost
+        
+        # Net profit = Gross profit - Allocated expenses - Losses
+        self.net_profit = self.gross_profit - self.allocated_expenses - self.broken_cost
+        
+        # Profit margin
+        if self.total_revenue > 0:
+            self.profit_margin = (self.net_profit / self.total_revenue) * 100
+        else:
+            self.profit_margin = Decimal('0.00')
+        
+        # Stock turnover ratio
+        if self.opening_stock > 0:
+            avg_stock = (self.opening_stock + self.closing_stock) / 2
+            if avg_stock > 0:
+                self.stock_turnover_ratio = self.total_quantity_sold / avg_stock
+        
+        self.save()
 
 
 class Logistics(models.Model):
