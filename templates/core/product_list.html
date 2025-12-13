@@ -1,41 +1,32 @@
 {% extends 'base.html' %}
 
-{% block title %}Products - Kabisakabisa ERP{% endblock %}
+{% block title %}Products - SaasApp{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h1 class="page-title">Product Catalog</h1>
-    <div class="flex space-x-3 items-center">
+    <h1 class="page-title">Products</h1>
+    <div class="d-flex gap-2">
         <div class="search-box">
-            <form method="get" class="relative">
-                <input 
-                    type="text" 
-                    name="search" 
-                    class="form-input pl-10 w-64" 
-                    placeholder="Search products..." 
-                    value="{{ search }}"
-                >
-                <svg class="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                </svg>
+            <i class="bi bi-search search-icon"></i>
+            <form method="get">
+                <input type="text" name="search" class="form-control form-control-sm" placeholder="Search products..." value="{{ search }}">
             </form>
         </div>
-        <a href="{% url 'product_create' %}" class="btn btn-primary">Add Product</a>
+        <a href="{% url 'product_create' %}" class="btn btn-primary btn-sm"><i class="bi bi-plus me-1"></i>Add Product</a>
     </div>
 </div>
 
 <div class="card">
-    <div class="overflow-x-auto">
+    <div class="card-body p-0">
         {% if page_obj %}
-        <table class="table-modern">
+        <table class="table">
             <thead>
                 <tr>
-                    <th>Product Name</th>
                     <th>SKU</th>
+                    <th>Name</th>
                     <th>Category</th>
                     <th>Unit Price</th>
                     <th>Cost Price</th>
-                    <th>Margin</th>
                     <th>Status</th>
                     <th>Actions</th>
                 </tr>
@@ -43,25 +34,11 @@
             <tbody>
                 {% for product in page_obj %}
                 <tr>
-                    <td class="font-semibold text-gray-800">{{ product.name }}</td>
-                    <td>
-                        <span class="badge badge-secondary">{{ product.sku }}</span>
-                    </td>
-                    <td class="text-gray-600">{{ product.category|default:"Uncategorized" }}</td>
-                    <td class="font-bold text-green-600">${{ product.unit_price|floatformat:2 }}</td>
-                    <td class="text-gray-600">${{ product.cost_price|floatformat:2 }}</td>
-                    <td>
-                        {% widthratio product.unit_price 1 100 as unit_in_cents %}
-                        {% widthratio product.cost_price 1 100 as cost_in_cents %}
-                        {% if cost_in_cents > 0 %}
-                            {% widthratio unit_in_cents cost_in_cents 1 as margin %}
-                            <span class="badge {% if margin >= 150 %}badge-success{% elif margin >= 120 %}badge-warning{% else %}badge-danger{% endif %}">
-                                {{ margin|floatformat:0 }}%
-                            </span>
-                        {% else %}
-                            <span class="badge badge-secondary">N/A</span>
-                        {% endif %}
-                    </td>
+                    <td><code>{{ product.sku }}</code></td>
+                    <td><strong>{{ product.name }}</strong></td>
+                    <td>{{ product.category|default:'-' }}</td>
+                    <td>${{ product.unit_price }}</td>
+                    <td>${{ product.cost_price }}</td>
                     <td>
                         {% if product.is_active %}
                             <span class="badge badge-success">Active</span>
@@ -70,15 +47,11 @@
                         {% endif %}
                     </td>
                     <td>
-                        <div class="flex space-x-2">
-                            <a href="{% url 'product_edit' product.pk %}" class="btn btn-sm bg-yellow-600 hover:bg-yellow-700 text-white">
-                                Edit
-                            </a>
+                        <div class="action-btns">
+                            <a href="{% url 'product_edit' product.pk %}" class="btn btn-outline-primary btn-sm"><i class="bi bi-pencil"></i></a>
                             <form method="post" action="{% url 'product_delete' product.pk %}" style="display:inline;" onsubmit="return confirm('Delete this product?')">
                                 {% csrf_token %}
-                                <button type="submit" class="btn btn-sm btn-danger">
-                                    Delete
-                                </button>
+                                <button type="submit" class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
                             </form>
                         </div>
                     </td>
@@ -87,29 +60,13 @@
             </tbody>
         </table>
         
-        <!-- Pagination -->
-        {% if page_obj.has_other_pages %}
-        <div class="pagination">
-            {% if page_obj.has_previous %}
-                <a href="?page=1{% if search %}&search={{ search }}{% endif %}">First</a>
-                <a href="?page={{ page_obj.previous_page_number }}{% if search %}&search={{ search }}{% endif %}">Previous</a>
-            {% endif %}
-            
-            <span class="px-4 py-2 bg-primary text-white border-primary rounded-lg">
-                Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
-            </span>
-            
-            {% if page_obj.has_next %}
-                <a href="?page={{ page_obj.next_page_number }}{% if search %}&search={{ search }}{% endif %}">Next</a>
-                <a href="?page={{ page_obj.paginator.num_pages }}{% if search %}&search={{ search }}{% endif %}">Last</a>
-            {% endif %}
-        </div>
-        {% endif %}
+        {% include 'core/pagination.html' %}
         {% else %}
         <div class="empty-state">
-            <h3>No Products Found</h3>
-            <p class="mb-4">Start by adding products to your catalog</p>
-            <a href="{% url 'product_create' %}" class="btn btn-primary">Add Product</a>
+            <i class="bi bi-tags" style="font-size: 3rem;"></i>
+            <h5>No products found</h5>
+            <p>Add products to your catalog</p>
+            <a href="{% url 'product_create' %}" class="btn btn-primary btn-sm">Add Product</a>
         </div>
         {% endif %}
     </div>

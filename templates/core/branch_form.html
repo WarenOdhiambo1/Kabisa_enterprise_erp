@@ -1,107 +1,48 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ action }} Branch - Kabisakabisa ERP{% endblock %}
+{% block title %}{{ action }} Branch - SaasApp{% endblock %}
 
 {% block content %}
 <div class="page-header">
     <h1 class="page-title">{{ action }} Branch</h1>
-    <a href="{% url 'branch_list' %}" class="btn btn-outline">
-        Back to Branches
-    </a>
 </div>
 
-<div class="max-w-4xl">
-    <div class="card">
-        <div class="card-header">Branch Information</div>
-        <div class="card-body">
-            <form method="post" class="space-y-6">
-                {% csrf_token %}
-                
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <!-- Branch Name -->
-                    <div>
-                        <label class="form-label">Branch Name <span class="text-red-500">*</span></label>
-                        <input 
-                            type="text" 
-                            name="name" 
-                            class="form-input" 
-                            value="{{ branch.name|default:'' }}" 
-                            required
-                            placeholder="Enter branch name"
-                        >
-                        <p class="text-xs text-gray-500 mt-1">The official name of this branch</p>
-                    </div>
-
-                    <!-- Phone -->
-                    <div>
-                        <label class="form-label">Phone Number</label>
-                        <input 
-                            type="text" 
-                            name="phone" 
-                            class="form-input" 
-                            value="{{ branch.phone|default:'' }}"
-                            placeholder="+1 234 567 8900"
-                        >
-                        <p class="text-xs text-gray-500 mt-1">Contact phone for this branch</p>
-                    </div>
-
-                    <!-- Email -->
-                    <div>
-                        <label class="form-label">Email Address</label>
-                        <input 
-                            type="email" 
-                            name="email" 
-                            class="form-input" 
-                            value="{{ branch.email|default:'' }}"
-                            placeholder="branch@example.com"
-                        >
-                        <p class="text-xs text-gray-500 mt-1">Official email for this branch</p>
-                    </div>
-
-                    <!-- Status -->
+<div class="card">
+    <div class="card-body">
+        <form method="post">
+            {% csrf_token %}
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Branch Name *</label>
+                    <input type="text" name="name" class="form-control" value="{{ branch.name|default:'' }}" required>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Phone</label>
+                    <input type="text" name="phone" class="form-control" value="{{ branch.phone|default:'' }}">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Email</label>
+                    <input type="email" name="email" class="form-control" value="{{ branch.email|default:'' }}">
+                </div>
+                <div class="col-md-6">
                     {% if branch %}
-                    <div>
-                        <label class="form-label">Status</label>
-                        <div class="flex items-center mt-2">
-                            <input 
-                                type="checkbox" 
-                                name="is_active" 
-                                id="is_active"
-                                class="w-4 h-4 text-primary bg-gray-100 border-gray-300 rounded focus:ring-primary focus:ring-2" 
-                                {% if branch.is_active %}checked{% endif %}
-                            >
-                            <label for="is_active" class="ml-2 text-sm font-medium text-gray-700">
-                                Branch is active
-                            </label>
-                        </div>
-                        <p class="text-xs text-gray-500 mt-1">Inactive branches won't appear in selection lists</p>
+                    <label class="form-label">Status</label>
+                    <div class="form-check mt-2">
+                        <input type="checkbox" name="is_active" class="form-check-input" {% if branch.is_active %}checked{% endif %}>
+                        <label class="form-check-label">Active</label>
                     </div>
                     {% endif %}
                 </div>
-
-                <!-- Address -->
-                <div>
-                    <label class="form-label">Full Address</label>
-                    <textarea 
-                        name="address" 
-                        class="form-textarea" 
-                        rows="3"
-                        placeholder="Enter complete address including street, city, state, and postal code"
-                    >{{ branch.address|default:'' }}</textarea>
-                    <p class="text-xs text-gray-500 mt-1">Full physical address of the branch</p>
+                <div class="col-12">
+                    <label class="form-label">Address</label>
+                    <textarea name="address" class="form-control" rows="2">{{ branch.address|default:'' }}</textarea>
                 </div>
-
-                <!-- Action Buttons -->
-                <div class="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-                    <a href="{% url 'branch_list' %}" class="btn btn-secondary">
-                        Cancel
-                    </a>
-                    <button type="submit" class="btn btn-primary">
-                        Save Branch
-                    </button>
-                </div>
-            </form>
-        </div>
+            </div>
+            <div class="mt-4">
+                <button type="submit" class="btn btn-primary">Save Branch</button>
+                <a href="{% url 'branch_list' %}" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
     </div>
 </div>
 {% endblock %}
