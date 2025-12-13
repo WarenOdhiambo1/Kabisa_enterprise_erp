@@ -1,8 +1,9 @@
 from django.contrib import admin
+from django.utils.html import format_html
 from .models import (
     Branch, Employee, Product, Stock, StockMovement, Order, OrderItem, 
     Sale, SaleItem, UserProfile, Expense, Logistics, Vehicle, Trip, VehicleMaintenance,
-    OrderFulfillment, OrderShipment, ShipmentItem, PaymentCollection
+    OrderFulfillment, OrderShipment, ShipmentItem, PaymentCollection, BusinessNote
 )
 
 
@@ -77,9 +78,71 @@ class UserProfileAdmin(admin.ModelAdmin):
 
 @admin.register(Expense)
 class ExpenseAdmin(admin.ModelAdmin):
-    list_display = ['expense_number', 'branch', 'expense_type', 'amount', 'expense_date', 'sale']
+    list_display = ['expense_number', 'branch', 'expense_type', 'amount', 'expense_date', 'sale', 'is_auto_generated']
     list_filter = ['expense_type', 'branch', 'expense_date']
     search_fields = ['expense_number', 'description']
+    readonly_fields = ['created_at']
+    date_hierarchy = 'expense_date'
+    
+    fieldsets = (
+        ('Expense Information', {
+            'fields': ('expense_number', 'branch', 'expense_type')
+        }),
+        ('Details', {
+            'fields': ('description', 'amount', 'expense_date')
+        }),
+        ('References', {
+            'fields': ('sale', 'receipt_number')
+        }),
+        ('Additional Info', {
+            'fields': ('notes', 'created_by', 'created_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    actions = ['duplicate_expense', 'export_expenses']
+    
+    def is_auto_generated(self, obj):
+        """Check if expense was auto-generated"""
+        return obj.expense_number.startswith(('TRIP-', 'MAINT-', 'LOSS-'))
+    is_auto_generated.boolean = True
+    is_auto_generated.short_description = 'Auto Generated'
+    
+    def has_delete_permission(self, request, obj=None):
+        """Prevent deletion of auto-generated expenses"""
+        if obj and obj.expense_number.startswith(('TRIP-', 'MAINT-', 'LOSS-')):
+            return False
+        return super().has_delete_permission(request, obj)
+    
+    def has_change_permission(self, request, obj=None):
+        """Prevent modification of auto-generated expenses"""
+        if obj and obj.expense_number.startswith(('TRIP-', 'MAINT-', 'LOSS-')):
+            return False
+        return super().has_change_permission(request, obj)
+    
+    def duplicate_expense(self, request, queryset):
+        """Duplicate selected expenses"""
+        for expense in queryset:
+            if not expense.expense_number.startswith(('TRIP-', 'MAINT-', 'LOSS-')):
+                new_expense = Expense.objects.create(
+                    expense_number=f"DUP-{expense.expense_number}",
+                    branch=expense.branch,
+                    expense_type=expense.expense_type,
+                    description=f"Copy of: {expense.description}",
+                    amount=expense.amount,
+                    expense_date=expense.expense_date,
+                    receipt_number=expense.receipt_number,
+                    notes=expense.notes,
+                    created_by=expense.created_by
+                )
+        self.message_user(request, f"Duplicated {queryset.count()} expenses")
+    duplicate_expense.short_description = "Duplicate selected expenses"
+    
+    def export_expenses(self, request, queryset):
+        """Export expenses to CSV"""
+        # This will be implemented with CSV export functionality
+        self.message_user(request, f"Expense export not yet implemented")
+    export_expenses.short_description = "Export to CSV"
 
 
 @admin.register(Logistics)
@@ -122,10 +185,9 @@ class VehicleAdmin(admin.ModelAdmin):
 @admin.register(Trip)
 class TripAdmin(admin.ModelAdmin):
     list_display = ['trip_number', 'vehicle', 'driver', 'trip_type', 'origin', 'destination', 'status', 'scheduled_date', 'revenue', 'net_profit']
-    list_filter = ['status', 'trip_type', 'vehicle', 'scheduled_date']
+    list_filter = ['status', 'trip_type', 'vehicle']
     search_fields = ['trip_number', 'origin', 'destination', 'customer_name']
     readonly_fields = ['net_profit', 'duration', 'created_at', 'updated_at']
-    date_hierarchy = 'scheduled_date'
     
     fieldsets = (
         ('Trip Information', {
@@ -371,3 +433,16 @@ class PaymentCollectionAdmin(admin.ModelAdmin):
         # This will be implemented with Excel export functionality
         self.message_user(request, f"Payment report generation not yet implemented")
     generate_payment_report.short_description = "Generate payment report"
+
+
+@admin.register(BusinessNote)
+class BusinessNoteAdmin(admin.ModelAdmin):
+    list_display = ['page_number', 'content_preview', 'created_by', 'created_at']
+    list_filter = ['created_at', 'created_by']
+    search_fields = ['content']
+    readonly_fields = ['created_at', 'updated_at']
+    ordering = ['page_number']
+    
+    def content_preview(self, obj):
+        return obj.content[:50] + '...' if len(obj.content) > 50 else obj.content
+    content_preview.short_description = 'Content Preview'

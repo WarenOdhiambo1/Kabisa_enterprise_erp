@@ -6,19 +6,25 @@
 <div class="page-header">
     <h1 class="page-title">Stock Movements</h1>
     <div class="d-flex gap-2">
-        <div class="search-box">
-            <i class="bi bi-search search-icon"></i>
-            <form method="get">
+        <form method="get" class="d-flex gap-2">
+            <div class="search-box">
+                <i class="bi bi-search search-icon"></i>
                 <input type="text" name="search" class="form-control form-control-sm" placeholder="Search movements..." value="{{ search }}">
-            </form>
-        </div>
+            </div>
+            <select name="branch" class="form-select form-select-sm" onchange="this.form.submit()">
+                <option value="">All Branches</option>
+                {% for branch in branches %}
+                <option value="{{ branch.id }}" {% if branch.id|stringformat:"s" == selected_branch %}selected{% endif %}>{{ branch.name }}</option>
+                {% endfor %}
+            </select>
+        </form>
         <a href="{% url 'stock_transfer' %}" class="btn btn-primary btn-sm"><i class="bi bi-truck me-1"></i>New Transfer</a>
     </div>
 </div>
 
 <div class="card">
     <div class="card-body p-0">
-        {% if movements %}
+        {% if page_obj %}
         <table class="table">
             <thead>
                 <tr>
@@ -33,7 +39,7 @@
                 </tr>
             </thead>
             <tbody>
-                {% for movement in movements %}
+                {% for movement in page_obj %}
                 <tr>
                     <td class="text-muted">{{ movement.created_at|date:"M d, H:i" }}</td>
                     <td><strong>{{ movement.stock.product.name }}</strong></td>
@@ -65,6 +71,8 @@
                 {% endfor %}
             </tbody>
         </table>
+        
+        {% include 'core/pagination.html' %}
         {% else %}
         <div class="empty-state">
             <i class="bi bi-arrow-left-right" style="font-size: 3rem;"></i>

@@ -18,7 +18,7 @@
 
 <div class="card">
     <div class="card-body p-0">
-        {% if orders %}
+        {% if page_obj %}
         <table class="table">
             <thead>
                 <tr>
@@ -33,7 +33,7 @@
                 </tr>
             </thead>
             <tbody>
-                {% for order in orders %}
+                {% for order in page_obj %}
                 <tr>
                     <td><a href="{% url 'order_detail' order.pk %}"><strong>{{ order.order_number }}</strong></a></td>
                     <td>{{ order.branch.name }}</td>
@@ -61,6 +61,8 @@
                 {% endfor %}
             </tbody>
         </table>
+        
+        {% include 'core/pagination.html' %}
         {% else %}
         <div class="empty-state">
             <i class="bi bi-clipboard-check" style="font-size: 3rem;"></i>

@@ -18,7 +18,7 @@
 
 <div class="card">
     <div class="card-body p-0">
-        {% if products %}
+        {% if page_obj %}
         <table class="table">
             <thead>
                 <tr>
@@ -32,7 +32,7 @@
                 </tr>
             </thead>
             <tbody>
-                {% for product in products %}
+                {% for product in page_obj %}
                 <tr>
                     <td><code>{{ product.sku }}</code></td>
                     <td><strong>{{ product.name }}</strong></td>
@@ -59,6 +59,8 @@
                 {% endfor %}
             </tbody>
         </table>
+        
+        {% include 'core/pagination.html' %}
         {% else %}
         <div class="empty-state">
             <i class="bi bi-tags" style="font-size: 3rem;"></i>

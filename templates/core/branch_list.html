@@ -18,7 +18,7 @@
 
 <div class="card">
     <div class="card-body p-0">
-        {% if branches %}
+        {% if page_obj %}
         <table class="table">
             <thead>
                 <tr>
@@ -31,7 +31,7 @@
                 </tr>
             </thead>
             <tbody>
-                {% for branch in branches %}
+                {% for branch in page_obj %}
                 <tr>
                     <td><strong>{{ branch.name }}</strong></td>
                     <td>{{ branch.address|truncatechars:30 }}</td>
@@ -57,6 +57,8 @@
                 {% endfor %}
             </tbody>
         </table>
+        
+        {% include 'core/pagination.html' %}
         {% else %}
         <div class="empty-state">
             <i class="bi bi-building" style="font-size: 3rem;"></i>

@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from decimal import Decimal
+from simple_history.models import HistoricalRecords
 
 
 class Branch(models.Model):
@@ -53,12 +54,22 @@ class Product(models.Model):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    # Enterprise audit trail - tracks every price change
+    history = HistoricalRecords()
 
     class Meta:
         ordering = ['name']
 
     def __str__(self):
         return f"{self.name} ({self.sku})"
+    
+    @property
+    def profit_margin(self):
+        """Calculate profit margin percentage"""
+        if self.unit_price > 0:
+            return ((self.unit_price - self.cost_price) / self.unit_price) * 100
+        return 0
 
 
 class Stock(models.Model):
@@ -993,6 +1004,84 @@ class PaymentCollection(models.Model):
     def is_outstanding(self):
         """Check if payment is outstanding (collected but not deposited)"""
         return self.status == 'COMPLETED' and not self.is_deposited
+
+
+class PriceChangeLog(models.Model):
+    """Enterprise price change audit log"""
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='price_changes')
+    old_price = models.DecimalField(max_digits=10, decimal_places=2)
+    new_price = models.DecimalField(max_digits=10, decimal_places=2)
+    changed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    reason = models.TextField(blank=True)
+    change_date = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-change_date']
+    
+    def __str__(self):
+        return f"{self.product.name}: {self.old_price} → {self.new_price}"
+    
+    @property
+    def price_change_percent(self):
+        if self.old_price > 0:
+            return ((self.new_price - self.old_price) / self.old_price) * 100
+        return 0
+
+
+class FuelConsumption(models.Model):
+    """Track fuel consumption for vehicles"""
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name='fuel_records')
+    liters = models.DecimalField(max_digits=8, decimal_places=2, help_text="Liters of fuel consumed")
+    cost_per_liter = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal('0.00'))
+    total_cost = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    mileage_at_fill = models.IntegerField(help_text="Vehicle mileage when fuel was added")
+    fuel_station = models.CharField(max_length=200, blank=True)
+    receipt_number = models.CharField(max_length=100, blank=True)
+    date = models.DateField()
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-date', '-created_at']
+    
+    def __str__(self):
+        return f"{self.vehicle.registration_number} - {self.liters}L on {self.date}"
+    
+    def save(self, *args, **kwargs):
+        if not self.total_cost:
+            self.total_cost = self.liters * self.cost_per_liter
+        super().save(*args, **kwargs)
+
+
+class Maintenance(models.Model):
+    """Simplified maintenance model for logistics analytics"""
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name='maintenance_logs')
+    description = models.TextField()
+    cost = models.DecimalField(max_digits=10, decimal_places=2)
+    date = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"{self.vehicle.registration_number} - {self.description}"
+
+
+class BusinessNote(models.Model):
+    content = models.TextField(blank=True)
+    page_number = models.IntegerField(default=1)
+    created_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['page_number']
+    
+    def __str__(self):
+        return f"Page {self.page_number}"
+    
+    @property
+    def lines(self):
+        return self.content.split('\n')[:7]  # Max 7 lines per page
 
 
 class Logistics(models.Model):

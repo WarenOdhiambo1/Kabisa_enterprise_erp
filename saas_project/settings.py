@@ -4,7 +4,10 @@ Django settings for saas_project project.
 
 import os
 from pathlib import Path
-from decouple import config
+# from decouple import config
+
+def config(key, default=None):
+    return os.environ.get(key, default)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -26,6 +29,7 @@ INSTALLED_APPS = [
     'django_filters',
     'corsheaders',
     'django_extensions',
+    'simple_history',
     # Local apps
     'core',
 ]
@@ -156,3 +160,14 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
 ]
+
+# Google Maps API Configuration
+GOOGLE_MAPS_API_KEY = config('GOOGLE_MAPS_API_KEY', default='')
+
+# Celery Configuration for Background Tasks
+CELERY_BROKER_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = config('REDIS_URL', default='redis://localhost:6379/0')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE

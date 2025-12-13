@@ -10,7 +10,7 @@
 
 <div class="card">
     <div class="card-body p-0">
-        {% if users %}
+        {% if page_obj %}
         <table class="table">
             <thead>
                 <tr>
@@ -24,7 +24,7 @@
                 </tr>
             </thead>
             <tbody>
-                {% for user in users %}
+                {% for user in page_obj %}
                 <tr>
                     <td><strong>{{ user.username }}</strong></td>
                     <td>{{ user.first_name }} {{ user.last_name }}</td>
@@ -57,6 +57,8 @@
                 {% endfor %}
             </tbody>
         </table>
+        
+        {% include 'core/pagination.html' %}
         {% else %}
         <div class="empty-state">
             <h5>No Users Found</h5>

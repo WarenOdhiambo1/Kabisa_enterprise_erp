@@ -16,7 +16,7 @@
 
 <div class="card">
     <div class="card-body p-0">
-        {% if logistics %}
+        {% if page_obj %}
         <table class="table">
             <thead>
                 <tr>
@@ -30,7 +30,7 @@
                 </tr>
             </thead>
             <tbody>
-                {% for log in logistics %}
+                {% for log in page_obj %}
                 <tr>
                     <td><strong>{{ log.tracking_number }}</strong></td>
                     <td>
@@ -63,6 +63,8 @@
                 {% endfor %}
             </tbody>
         </table>
+        
+        {% include 'core/pagination.html' %}
         {% else %}
         <div class="empty-state">
             <h5>No Logistics Found</h5>
