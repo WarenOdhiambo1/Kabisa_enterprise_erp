@@ -7,12 +7,13 @@ from django.db.models import Sum, Count, Q, F
 from django.db import transaction
 from django.utils import timezone
 from django.http import JsonResponse
+from django.core.paginator import Paginator
 from decimal import Decimal
 from functools import wraps
 from datetime import datetime, timedelta
 import uuid
 
-from .models import Branch, Employee, Product, Stock, StockMovement, Order, OrderItem, Sale, SaleItem, UserProfile, Expense, Logistics, Vehicle, Trip, VehicleMaintenance
+from .models import Branch, Employee, Product, Stock, StockMovement, Order, OrderItem, Sale, SaleItem, UserProfile, Expense, Logistics, Vehicle, Trip, VehicleMaintenance, BusinessNote
 
 
 def role_required(*roles):
@@ -145,7 +146,16 @@ def branch_list(request):
     branches = Branch.objects.all()
     if search:
         branches = branches.filter(Q(name__icontains=search) | Q(address__icontains=search))
-    return render(request, 'core/branch_list.html', {'branches': branches, 'search': search})
+    
+    paginator = Paginator(branches, 5)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'core/branch_list.html', {
+        'page_obj': page_obj,
+        'branches': page_obj,
+        'search': search
+    })
 
 
 def branch_create(request):
@@ -192,7 +202,16 @@ def employee_list(request):
             Q(last_name__icontains=search) | 
             Q(email__icontains=search)
         )
-    return render(request, 'core/employee_list.html', {'employees': employees, 'search': search})
+    
+    paginator = Paginator(employees, 5)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'core/employee_list.html', {
+        'page_obj': page_obj,
+        'employees': page_obj,
+        'search': search
+    })
 
 
 def employee_create(request):
@@ -247,7 +266,16 @@ def product_list(request):
             Q(sku__icontains=search) | 
             Q(category__icontains=search)
         )
-    return render(request, 'core/product_list.html', {'products': products, 'search': search})
+    
+    paginator = Paginator(products, 5)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'core/product_list.html', {
+        'page_obj': page_obj,
+        'products': page_obj,
+        'search': search
+    })
 
 
 def product_create(request):
@@ -302,9 +330,14 @@ def stock_list(request):
     if branch_id:
         stocks = stocks.filter(branch_id=branch_id)
     
+    paginator = Paginator(stocks, 5)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
     branches = Branch.objects.filter(is_active=True)
     return render(request, 'core/stock_list.html', {
-        'stocks': stocks, 
+        'page_obj': page_obj,
+        'stocks': page_obj,
         'branches': branches,
         'search': search,
         'selected_branch': branch_id
@@ -341,7 +374,16 @@ def stock_create(request):
 
 def stock_movement_list(request):
     search = request.GET.get('search', '')
+    branch_id = request.GET.get('branch', '')
     movements = StockMovement.objects.select_related('stock__product', 'stock__branch', 'from_branch', 'to_branch').all()
+    
+    # Branch filter
+    if branch_id:
+        movements = movements.filter(
+            Q(stock__branch_id=branch_id) | 
+            Q(from_branch_id=branch_id) | 
+            Q(to_branch_id=branch_id)
+        )
     
     if search:
         movements = movements.filter(
@@ -349,7 +391,18 @@ def stock_movement_list(request):
             Q(notes__icontains=search)
         )
     
-    return render(request, 'core/stock_movement_list.html', {'movements': movements, 'search': search})
+    paginator = Paginator(movements, 5)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    branches = Branch.objects.filter(is_active=True)
+    return render(request, 'core/stock_movement_list.html', {
+        'page_obj': page_obj,
+        'movements': page_obj,
+        'search': search,
+        'branches': branches,
+        'selected_branch': branch_id
+    })
 
 
 def stock_transfer(request):
@@ -379,7 +432,7 @@ def stock_transfer(request):
             to_branch=to_branch,
             status='PENDING',
             notes=notes,
-            created_by=request.user.profile.employee if hasattr(request.user, 'profile') else None
+            created_by=None  # Will be fixed when Employee-User relationship is properly set up
         )
         
         # Create alert for receiving branch users
@@ -428,7 +481,15 @@ def order_list(request):
             Q(supplier__icontains=search)
         )
     
-    return render(request, 'core/order_list.html', {'orders': orders, 'search': search})
+    paginator = Paginator(orders, 5)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'core/order_list.html', {
+        'page_obj': page_obj,
+        'orders': page_obj,
+        'search': search
+    })
 
 
 def order_create(request):
@@ -499,6 +560,9 @@ def order_complete(request, pk):
 @role_required('ADMIN', 'BOSS', 'MANAGER', 'FINANCE', 'SALES')
 def sale_list(request):
     search = request.GET.get('search', '')
+    branch_id = request.GET.get('branch', '')
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
     sales = Sale.objects.select_related('branch').prefetch_related('items__stock__product').all()
     
     # Filter by branch for sales users
@@ -506,13 +570,36 @@ def sale_list(request):
     if user_profile and user_profile.role == 'SALES' and user_profile.branch:
         sales = sales.filter(branch=user_profile.branch)
     
+    # Apply filters
+    if branch_id:
+        sales = sales.filter(branch_id=branch_id)
+    
     if search:
         sales = sales.filter(
             Q(sale_number__icontains=search) | 
             Q(customer_name__icontains=search)
         )
     
-    return render(request, 'core/sale_list.html', {'sales': sales, 'search': search})
+    if date_from:
+        sales = sales.filter(created_at__gte=date_from)
+    if date_to:
+        sales = sales.filter(created_at__lte=date_to + ' 23:59:59')
+    
+    # Pagination - 5 sales per page
+    paginator = Paginator(sales, 5)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    branches = Branch.objects.filter(is_active=True)
+    return render(request, 'core/sale_list.html', {
+        'page_obj': page_obj,
+        'sales': page_obj,
+        'search': search,
+        'branches': branches,
+        'selected_branch': branch_id,
+        'date_from': date_from,
+        'date_to': date_to
+    })
 
 
 @login_required
@@ -619,7 +706,15 @@ def expense_list(request):
             Q(description__icontains=search)
         )
     
-    return render(request, 'core/expense_list.html', {'expenses': expenses, 'search': search})
+    paginator = Paginator(expenses, 5)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'core/expense_list.html', {
+        'page_obj': page_obj,
+        'expenses': page_obj,
+        'search': search
+    })
 
 
 @login_required
@@ -650,6 +745,59 @@ def expense_create(request):
     })
 
 
+@login_required
+@role_required('ADMIN', 'MANAGER', 'BOSS', 'FINANCE')
+def expense_update(request, pk):
+    expense = get_object_or_404(Expense, pk=pk)
+    
+    # Check if auto-generated
+    if expense.expense_number.startswith(('TRIP-', 'MAINT-', 'LOSS-')):
+        messages.error(request, 'Cannot modify auto-generated expenses')
+        return redirect('expense_list')
+    
+    branches = Branch.objects.filter(is_active=True)
+    sales = Sale.objects.select_related('branch').all()
+    
+    if request.method == 'POST':
+        expense.branch_id = request.POST.get('branch')
+        expense.sale_id = request.POST.get('sale') if request.POST.get('sale') else None
+        expense.expense_type = request.POST.get('expense_type')
+        expense.description = request.POST.get('description')
+        expense.amount = Decimal(request.POST.get('amount', '0'))
+        expense.expense_date = request.POST.get('expense_date')
+        expense.receipt_number = request.POST.get('receipt_number', '')
+        expense.notes = request.POST.get('notes', '')
+        expense.save()
+        messages.success(request, f'Expense {expense.expense_number} updated!')
+        return redirect('expense_list')
+    
+    return render(request, 'core/expense_form.html', {
+        'expense': expense,
+        'branches': branches,
+        'sales': sales,
+        'action': 'Update'
+    })
+
+
+@login_required
+@role_required('ADMIN', 'MANAGER', 'BOSS', 'FINANCE')
+def expense_delete(request, pk):
+    expense = get_object_or_404(Expense, pk=pk)
+    
+    # Check if auto-generated
+    if expense.expense_number.startswith(('TRIP-', 'MAINT-', 'LOSS-')):
+        messages.error(request, 'Cannot delete auto-generated expenses')
+        return redirect('expense_list')
+    
+    if request.method == 'POST':
+        expense_number = expense.expense_number
+        expense.delete()
+        messages.success(request, f'Expense {expense_number} deleted successfully')
+        return redirect('expense_list')
+    
+    return redirect('expense_list')
+
+
 # Logistics Management
 @login_required
 @role_required('ADMIN', 'MANAGER', 'BOSS', 'LOGISTICS', 'SALES')
@@ -663,7 +811,15 @@ def logistics_list(request):
             Q(customer_name__icontains=search)
         )
     
-    return render(request, 'core/logistics_list.html', {'logistics': logistics, 'search': search})
+    paginator = Paginator(logistics, 5)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'core/logistics_list.html', {
+        'page_obj': page_obj,
+        'logistics': page_obj,
+        'search': search
+    })
 
 
 @login_required
@@ -823,7 +979,15 @@ def branch_detail(request, pk):
 @role_required('ADMIN', 'BOSS')
 def user_list(request):
     users = User.objects.select_related('profile').all()
-    return render(request, 'core/user_list.html', {'users': users})
+    
+    paginator = Paginator(users, 5)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'core/user_list.html', {
+        'page_obj': page_obj,
+        'users': page_obj
+    })
 
 
 @login_required
@@ -922,7 +1086,15 @@ def vehicle_list(request):
             Q(model__icontains=search)
         )
     
-    return render(request, 'core/vehicle_list.html', {'vehicles': vehicles, 'search': search})
+    paginator = Paginator(vehicles, 5)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'core/vehicle_list.html', {
+        'page_obj': page_obj,
+        'vehicles': page_obj,
+        'search': search
+    })
 
 
 @login_required
@@ -963,6 +1135,9 @@ def vehicle_create(request):
 @role_required('ADMIN', 'BOSS', 'MANAGER', 'LOGISTICS')
 def trip_list(request):
     search = request.GET.get('search', '')
+    vehicle_id = request.GET.get('vehicle', '')
+    date_from = request.GET.get('date_from', '')
+    date_to = request.GET.get('date_to', '')
     trips = Trip.objects.select_related('vehicle', 'driver', 'sale').all()
     
     if search:
@@ -972,7 +1147,30 @@ def trip_list(request):
             Q(destination__icontains=search)
         )
     
-    return render(request, 'core/trip_list.html', {'trips': trips, 'search': search})
+    if vehicle_id:
+        trips = trips.filter(vehicle_id=vehicle_id)
+    
+    if date_from:
+        trips = trips.filter(scheduled_date__gte=date_from)
+    if date_to:
+        trips = trips.filter(scheduled_date__lte=date_to + ' 23:59:59')
+    
+    # Pagination - 5 trips per page
+    paginator = Paginator(trips, 5)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    vehicles = Vehicle.objects.all().order_by('registration_number')
+    
+    return render(request, 'core/trip_list.html', {
+        'page_obj': page_obj,
+        'trips': page_obj,  # For backward compatibility
+        'search': search,
+        'vehicles': vehicles,
+        'selected_vehicle': vehicle_id,
+        'date_from': date_from,
+        'date_to': date_to
+    })
 
 
 @login_required
@@ -1013,6 +1211,56 @@ def trip_create(request):
 
 @login_required
 @role_required('ADMIN', 'BOSS', 'MANAGER', 'LOGISTICS')
+def trip_update(request, pk):
+    trip = get_object_or_404(Trip, pk=pk)
+    vehicles = Vehicle.objects.filter(status='ACTIVE')
+    drivers = Employee.objects.filter(is_active=True)
+    sales = Sale.objects.all()[:50]
+    
+    if request.method == 'POST':
+        trip.vehicle_id = request.POST.get('vehicle')
+        trip.driver_id = request.POST.get('driver')
+        trip.trip_type = request.POST.get('trip_type')
+        trip.origin = request.POST.get('origin')
+        trip.destination = request.POST.get('destination')
+        trip.distance = Decimal(request.POST.get('distance', '0'))
+        trip.sale_id = request.POST.get('sale') if request.POST.get('sale') else None
+        trip.scheduled_date = request.POST.get('scheduled_date')
+        trip.revenue = Decimal(request.POST.get('revenue', '0'))
+        trip.fuel_cost = Decimal(request.POST.get('fuel_cost', '0'))
+        trip.other_expenses = Decimal(request.POST.get('other_expenses', '0'))
+        trip.customer_name = request.POST.get('customer_name', '')
+        trip.customer_phone = request.POST.get('customer_phone', '')
+        trip.notes = request.POST.get('notes', '')
+        trip.save()
+        messages.success(request, f'Trip {trip.trip_number} updated successfully!')
+        return redirect('trip_list')
+    
+    return render(request, 'core/trip_form.html', {
+        'trip': trip,
+        'vehicles': vehicles,
+        'drivers': drivers,
+        'sales': sales,
+        'action': 'Update'
+    })
+
+
+@login_required
+@role_required('ADMIN', 'BOSS', 'MANAGER', 'LOGISTICS')
+def trip_delete(request, pk):
+    trip = get_object_or_404(Trip, pk=pk)
+    
+    if request.method == 'POST':
+        trip_number = trip.trip_number
+        trip.delete()
+        messages.success(request, f'Trip {trip_number} deleted successfully!')
+        return redirect('trip_list')
+    
+    return redirect('trip_list')
+
+
+@login_required
+@role_required('ADMIN', 'BOSS', 'MANAGER', 'LOGISTICS')
 def maintenance_list(request):
     search = request.GET.get('search', '')
     maintenance = VehicleMaintenance.objects.select_related('vehicle').all()
@@ -1024,7 +1272,52 @@ def maintenance_list(request):
             Q(service_provider__icontains=search)
         )
     
-    return render(request, 'core/maintenance_list.html', {'maintenance': maintenance, 'search': search})
+    # Pagination - 5 maintenance records per page
+    paginator = Paginator(maintenance, 5)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'core/maintenance_list.html', {
+        'page_obj': page_obj,
+        'maintenance': page_obj,
+        'search': search
+    })
+
+
+@login_required
+@role_required('ADMIN', 'BOSS', 'MANAGER', 'LOGISTICS')
+def vehicle_edit(request, pk):
+    vehicle = get_object_or_404(Vehicle, pk=pk)
+    branches = Branch.objects.filter(is_active=True)
+    drivers = Employee.objects.filter(is_active=True)
+    
+    if request.method == 'POST':
+        vehicle.registration_number = request.POST.get('registration_number')
+        vehicle.vehicle_type = request.POST.get('vehicle_type')
+        vehicle.make = request.POST.get('make')
+        vehicle.model = request.POST.get('model')
+        vehicle.year = int(request.POST.get('year'))
+        vehicle.color = request.POST.get('color', '')
+        vehicle.branch_id = request.POST.get('branch')
+        vehicle.assigned_driver_id = request.POST.get('assigned_driver') if request.POST.get('assigned_driver') else None
+        vehicle.status = request.POST.get('status')
+        vehicle.current_mileage = int(request.POST.get('current_mileage', 0))
+        vehicle.fuel_capacity = Decimal(request.POST.get('fuel_capacity', '0'))
+        vehicle.purchase_price = Decimal(request.POST.get('purchase_price', '0'))
+        vehicle.purchase_date = request.POST.get('purchase_date') if request.POST.get('purchase_date') else None
+        vehicle.insurance_expiry = request.POST.get('insurance_expiry') if request.POST.get('insurance_expiry') else None
+        vehicle.registration_expiry = request.POST.get('registration_expiry') if request.POST.get('registration_expiry') else None
+        vehicle.notes = request.POST.get('notes', '')
+        vehicle.save()
+        messages.success(request, f'Vehicle {vehicle.registration_number} updated successfully!')
+        return redirect('vehicle_list')
+    
+    return render(request, 'core/vehicle_form.html', {
+        'vehicle': vehicle,
+        'branches': branches,
+        'drivers': drivers,
+        'action': 'Edit'
+    })
 
 
 @login_required
@@ -1055,3 +1348,140 @@ def maintenance_create(request):
         'vehicles': vehicles,
         'action': 'Create'
     })
+
+
+@login_required
+def note_list(request):
+    search = request.GET.get('search', '')
+    priority = request.GET.get('priority', '')
+    notes = BusinessNote.objects.select_related('created_by').all()
+    
+    if search:
+        notes = notes.filter(
+            Q(title__icontains=search) | 
+            Q(content__icontains=search) | 
+            Q(tags__icontains=search)
+        )
+    
+    if priority:
+        notes = notes.filter(priority=priority)
+    
+    paginator = Paginator(notes, 10)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'core/note_list.html', {
+        'page_obj': page_obj,
+        'notes': page_obj,
+        'search': search,
+        'selected_priority': priority
+    })
+
+
+@login_required
+def note_create(request):
+    if request.method == 'POST':
+        note = BusinessNote.objects.create(
+            title=request.POST.get('title'),
+            content=request.POST.get('content'),
+            priority=request.POST.get('priority', 'MEDIUM'),
+            tags=request.POST.get('tags', ''),
+            created_by=getattr(request.user, 'employee', None)
+        )
+        messages.success(request, f'Note "{note.title}" created successfully!')
+        return redirect('note_list')
+    
+    return render(request, 'core/note_form.html', {'action': 'Create'})
+
+
+@login_required
+def note_update(request, pk):
+    note = get_object_or_404(BusinessNote, pk=pk)
+    
+    if request.method == 'POST':
+        note.title = request.POST.get('title')
+        note.content = request.POST.get('content')
+        note.priority = request.POST.get('priority', 'MEDIUM')
+        note.tags = request.POST.get('tags', '')
+        note.save()
+        messages.success(request, f'Note "{note.title}" updated successfully!')
+        return redirect('note_list')
+    
+    return render(request, 'core/note_form.html', {'note': note, 'action': 'Update'})
+
+
+@login_required
+def note_delete(request, pk):
+    note = get_object_or_404(BusinessNote, pk=pk)
+    
+    if request.method == 'POST':
+        title = note.title
+        note.delete()
+        messages.success(request, f'Note "{title}" deleted successfully!')
+        return redirect('note_list')
+    
+    return redirect('note_list')
+
+
+@login_required
+def notebook(request):
+    try:
+        page_param = request.GET.get('page', '1')
+        page_number = int(page_param) if page_param else 1
+    except (ValueError, TypeError):
+        page_number = 1
+    
+    if request.method == 'POST':
+        content = request.POST.get('content', '')
+        note, created = BusinessNote.objects.get_or_create(
+            page_number=page_number,
+            defaults={'content': content}
+        )
+        if not created:
+            note.content = content
+            note.save()
+        return JsonResponse({'status': 'saved'})
+    
+    note = BusinessNote.objects.filter(page_number=page_number).first()
+    content = note.content if note else ''
+    
+    return render(request, 'core/notebook.html', {
+        'content': content,
+        'page_number': page_number
+    })
+
+
+@login_required
+@role_required('ADMIN', 'BOSS', 'FINANCE', 'MANAGER')
+def analytics_dashboard(request):
+    from .analytics import FinancialAnalytics
+    import json
+    
+    branch_id = request.GET.get('branch')
+    period_days = int(request.GET.get('period', 365))
+    
+    # Get financial metrics
+    metrics = FinancialAnalytics.get_revenue_metrics(branch_id, period_days)
+    
+    # Get analytics data
+    forecast_data = FinancialAnalytics.sales_forecast_data()
+    risk_data = FinancialAnalytics.risk_assessment()
+    inventory_data = FinancialAnalytics.inventory_analysis()
+    route_data = FinancialAnalytics.route_optimization()
+    chart_data = FinancialAnalytics.get_chart_data()
+    
+    branches = Branch.objects.filter(is_active=True)
+    
+    context = {
+        'metrics': metrics,
+        'forecast_data': forecast_data,
+        'risk_data': risk_data,
+        'inventory_data': inventory_data,
+        'route_data': route_data,
+        'chart_data': json.dumps(chart_data),
+        'branches': branches,
+        'selected_branch': branch_id,
+        'selected_period': period_days
+    }
+    
+    return render(request, 'core/analytics_dashboard.html', context)

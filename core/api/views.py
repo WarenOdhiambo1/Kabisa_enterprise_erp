@@ -146,6 +146,58 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     search_fields = ['expense_number', 'description']
     ordering_fields = ['expense_date', 'amount']
     ordering = ['-expense_date']
+    
+    def update(self, request, *args, **kwargs):
+        """Update expense with validation"""
+        expense = self.get_object()
+        
+        # Check if expense is auto-generated (prevent modification of system expenses)
+        if expense.expense_number.startswith(('TRIP-', 'MAINT-', 'LOSS-')):
+            return Response(
+                {'error': 'Cannot modify auto-generated expenses'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        return super().update(request, *args, **kwargs)
+    
+    def destroy(self, request, *args, **kwargs):
+        """Delete expense with validation"""
+        expense = self.get_object()
+        
+        # Check if expense is auto-generated
+        if expense.expense_number.startswith(('TRIP-', 'MAINT-', 'LOSS-')):
+            return Response(
+                {'error': 'Cannot delete auto-generated expenses'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        return super().destroy(request, *args, **kwargs)
+    
+    @action(detail=False, methods=['get'])
+    def by_type(self, request):
+        """Get expenses grouped by type"""
+        from django.db.models import Sum
+        expense_summary = self.queryset.values('expense_type').annotate(
+            total_amount=Sum('amount'),
+            count=models.Count('id')
+        ).order_by('-total_amount')
+        
+        return Response(expense_summary)
+    
+    @action(detail=False, methods=['get'])
+    def monthly_summary(self, request):
+        """Get monthly expense summary"""
+        from django.db.models import Sum
+        from django.db.models.functions import TruncMonth
+        
+        monthly_expenses = self.queryset.annotate(
+            month=TruncMonth('expense_date')
+        ).values('month').annotate(
+            total_amount=Sum('amount'),
+            count=models.Count('id')
+        ).order_by('-month')
+        
+        return Response(monthly_expenses)
 
 
 class VehicleViewSet(viewsets.ModelViewSet):

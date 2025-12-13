@@ -28,8 +28,14 @@ def broken_products_list(request):
             stock__product__name__icontains=search
         )
     
+    from django.core.paginator import Paginator
+    paginator = Paginator(broken_items, 5)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
     return render(request, 'core/broken_products_list.html', {
-        'broken_items': broken_items,
+        'page_obj': page_obj,
+        'broken_items': page_obj,
         'search': search
     })
 
